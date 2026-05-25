@@ -477,7 +477,7 @@ Each `LoadXxx` is a sub-task. Ordered by typical TC startup order (which is itse
 - [ ] **#GLOB.42** `load_exploration_base_xp`.
 - [ ] **#GLOB.43** `load_fishing_base_skill_level` + `load_skill_tiers`.
 - [ ] **#GLOB.44** `load_mail_level_rewards`.
-- [ ] **#GLOB.45** `load_reputation_reward_rate` + `load_reputation_on_kill` + `load_reputation_spillover_template`.
+- [~] **#GLOB.45** `load_reputation_reward_rate` + `load_reputation_on_kill` + `load_reputation_spillover_template`. (`reputation_reward_rate` reader/validation represented in `#NEXT.R8.ENTITIES.663`; on-kill and spillover templates remain open)
 - [ ] **#GLOB.46** `load_points_of_interest` + `_locale`.
 - [ ] **#GLOB.47** `load_npc_spell_click_spells`.
 - [ ] **#GLOB.48** `load_game_object_for_quests`.

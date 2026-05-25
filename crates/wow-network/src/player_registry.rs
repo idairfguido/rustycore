@@ -162,6 +162,8 @@ pub struct PlayerBroadcastInfo {
     pub player_name: String,
     /// Account ID — kept for future same-account filtering.
     pub account_id: u32,
+    /// Login account recruiter ID, used by C++ Recruit-A-Friend reward checks.
+    pub recruiter_id: u32,
     // ── Character attributes for broadcast packets ──
     /// Race (human, dwarf, etc.)
     pub race: u8,

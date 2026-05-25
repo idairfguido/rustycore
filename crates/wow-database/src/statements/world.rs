@@ -64,6 +64,12 @@ pub enum WorldStatements {
     SEL_WORLD_STATE_IDS,
     /// Load C++ WorldStateMgr templates/default metadata.
     SEL_WORLD_STATES,
+    /// C++ ObjectMgr::LoadReputationRewardRate startup query.
+    SEL_REPUTATION_REWARD_RATE,
+    /// C++ ObjectMgr::LoadReputationOnKill startup query.
+    SEL_CREATURE_ONKILL_REPUTATION,
+    /// C++ ObjectMgr::LoadReputationSpilloverTemplate startup query.
+    SEL_REPUTATION_SPILLOVER_TEMPLATE,
     /// SELECT Experience FROM player_xp_for_level ORDER BY Level
     SEL_PLAYER_XP_FOR_LEVEL,
     SEL_CREATURE_BY_ID,
@@ -448,6 +454,15 @@ impl StatementDef for WorldStatements {
             Self::SEL_WORLD_STATE_IDS => "SELECT ID FROM world_state",
             Self::SEL_WORLD_STATES => {
                 "SELECT ID, DefaultValue, MapIDs, AreaIDs, ScriptName FROM world_state"
+            }
+            Self::SEL_REPUTATION_REWARD_RATE => {
+                "SELECT faction, quest_rate, quest_daily_rate, quest_weekly_rate, quest_monthly_rate, quest_repeatable_rate, creature_rate, spell_rate FROM reputation_reward_rate"
+            }
+            Self::SEL_CREATURE_ONKILL_REPUTATION => {
+                "SELECT creature_id, RewOnKillRepFaction1, RewOnKillRepFaction2, IsTeamAward1, MaxStanding1, RewOnKillRepValue1, IsTeamAward2, MaxStanding2, RewOnKillRepValue2, TeamDependent FROM creature_onkill_reputation"
+            }
+            Self::SEL_REPUTATION_SPILLOVER_TEMPLATE => {
+                "SELECT faction, faction1, rate_1, rank_1, faction2, rate_2, rank_2, faction3, rate_3, rank_3, faction4, rate_4, rank_4, faction5, rate_5, rank_5 FROM reputation_spillover_template"
             }
             Self::SEL_CREATURE_BY_ID => "SELECT guid FROM creature WHERE id = ?",
             Self::SEL_CREATURE_ENTRY_BY_GUID => "SELECT id FROM creature WHERE guid = ?",
@@ -863,7 +878,7 @@ impl StatementDef for WorldStatements {
             Self::SEL_CONVERSATION_LINE_TEMPLATE_IDS => "SELECT Id FROM conversation_line_template",
             Self::SEL_AREA_TRIGGER_TEMPLATE_IDS => "SELECT Id, IsCustom FROM areatrigger_template",
             Self::SEL_QUEST_TEMPLATE => concat!(
-                "SELECT qt.ID, qt.QuestType, qt.QuestLevel, qt.QuestMaxScalingLevel, qt.MinLevel, qt.QuestSortID, ",
+                "SELECT qt.ID, qt.QuestType, qt.QuestLevel, qt.QuestMaxScalingLevel, qt.QuestPackageID, qt.MinLevel, qt.QuestSortID, ",
                 "qt.QuestInfoID, qt.SuggestedGroupNum, qt.RewardNextQuest, qt.RewardXPDifficulty, qt.RewardXPMultiplier, ",
                 "qt.RewardMoneyDifficulty, qt.RewardMoneyMultiplier, qt.RewardBonusMoney, ",
                 "qt.RewardDisplaySpell1, qt.RewardDisplaySpell2, qt.RewardDisplaySpell3, ",
@@ -894,8 +909,32 @@ impl StatementDef for WorldStatements {
                 "qt.Expansion, ",
                 "qt.StartItem, ",
                 "COALESCE(qta.SourceSpellID, 0) AS SourceSpellID, ",
-                "COALESCE(qta.ProvidedItemCount, 0) AS ProvidedItemCount ",
-                "FROM quest_template qt LEFT JOIN quest_template_addon qta ON qt.ID = qta.ID"
+                "COALESCE(qta.ProvidedItemCount, 0) AS ProvidedItemCount, ",
+                "qt.TimeAllowed, ",
+                "COALESCE(qrci.Type1, 0) AS RewardChoiceItemType1, ",
+                "COALESCE(qrci.Type2, 0) AS RewardChoiceItemType2, ",
+                "COALESCE(qrci.Type3, 0) AS RewardChoiceItemType3, ",
+                "COALESCE(qrci.Type4, 0) AS RewardChoiceItemType4, ",
+                "COALESCE(qrci.Type5, 0) AS RewardChoiceItemType5, ",
+                "COALESCE(qrci.Type6, 0) AS RewardChoiceItemType6, ",
+                "qt.RewardCurrencyID1, qt.RewardCurrencyQty1, ",
+                "qt.RewardCurrencyID2, qt.RewardCurrencyQty2, ",
+                "qt.RewardCurrencyID3, qt.RewardCurrencyQty3, ",
+                "qt.RewardCurrencyID4, qt.RewardCurrencyQty4, ",
+                "qt.RewardSkillLineID, qt.RewardNumSkillUps, qt.RewardTitle, ",
+                "COALESCE(qta.RewardMailTemplateID, 0) AS RewardMailTemplateID, ",
+                "COALESCE(qta.RewardMailDelay, 0) AS RewardMailDelay, ",
+                "COALESCE(qms.RewardMailSenderEntry, 0) AS RewardMailSenderEntry, ",
+                "qt.RewardFactionID1, qt.RewardFactionValue1, qt.RewardFactionOverride1, qt.RewardFactionCapIn1, ",
+                "qt.RewardFactionID2, qt.RewardFactionValue2, qt.RewardFactionOverride2, qt.RewardFactionCapIn2, ",
+                "qt.RewardFactionID3, qt.RewardFactionValue3, qt.RewardFactionOverride3, qt.RewardFactionCapIn3, ",
+                "qt.RewardFactionID4, qt.RewardFactionValue4, qt.RewardFactionOverride4, qt.RewardFactionCapIn4, ",
+                "qt.RewardFactionID5, qt.RewardFactionValue5, qt.RewardFactionOverride5, qt.RewardFactionCapIn5, ",
+                "qt.RewardFactionFlags ",
+                "FROM quest_template qt ",
+                "LEFT JOIN quest_template_addon qta ON qt.ID = qta.ID ",
+                "LEFT JOIN quest_reward_choice_items qrci ON qt.ID = qrci.QuestID ",
+                "LEFT JOIN quest_mail_sender qms ON qt.ID = qms.QuestId"
             ),
             Self::SEL_QUEST_OBJECTIVES => {
                 "SELECT ID, QuestID, Type, `Order`, StorageIndex, ObjectID, Amount, Flags, Flags2, ProgressBarWeight, Description FROM quest_objectives ORDER BY QuestID, `Order`"
@@ -940,6 +979,36 @@ mod tests {
     }
 
     #[test]
+    fn reputation_reward_rate_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_REPUTATION_REWARD_RATE.sql();
+        assert_eq!(
+            sql,
+            "SELECT faction, quest_rate, quest_daily_rate, quest_weekly_rate, quest_monthly_rate, quest_repeatable_rate, creature_rate, spell_rate FROM reputation_reward_rate"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn creature_onkill_reputation_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_CREATURE_ONKILL_REPUTATION.sql();
+        assert_eq!(
+            sql,
+            "SELECT creature_id, RewOnKillRepFaction1, RewOnKillRepFaction2, IsTeamAward1, MaxStanding1, RewOnKillRepValue1, IsTeamAward2, MaxStanding2, RewOnKillRepValue2, TeamDependent FROM creature_onkill_reputation"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn reputation_spillover_template_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_REPUTATION_SPILLOVER_TEMPLATE.sql();
+        assert_eq!(
+            sql,
+            "SELECT faction, faction1, rate_1, rank_1, faction2, rate_2, rank_2, faction3, rate_3, rank_3, faction4, rate_4, rank_4, faction5, rate_5, rank_5 FROM reputation_spillover_template"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
     fn game_event_quest_condition_statement_matches_cpp_sql_exactly() {
         let sql = WorldStatements::SEL_GAME_EVENT_QUEST_CONDITIONS.sql();
         assert_eq!(
@@ -957,6 +1026,26 @@ mod tests {
             "SELECT questId, eventEntry FROM game_event_seasonal_questrelation"
         );
         assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn quest_template_statement_loads_reward_choice_item_types_like_cpp() {
+        let sql = WorldStatements::SEL_QUEST_TEMPLATE.sql();
+
+        assert!(sql.contains("qt.QuestPackageID"));
+        assert!(sql.contains("COALESCE(qrci.Type1, 0) AS RewardChoiceItemType1"));
+        assert!(sql.contains("COALESCE(qrci.Type6, 0) AS RewardChoiceItemType6"));
+        assert!(sql.contains("LEFT JOIN quest_reward_choice_items qrci ON qt.ID = qrci.QuestID"));
+        assert!(sql.contains("qt.RewardCurrencyID1, qt.RewardCurrencyQty1"));
+        assert!(sql.contains("qt.RewardCurrencyID4, qt.RewardCurrencyQty4"));
+        assert!(sql.contains("qt.RewardSkillLineID, qt.RewardNumSkillUps, qt.RewardTitle"));
+        assert!(sql.contains("COALESCE(qta.RewardMailTemplateID, 0) AS RewardMailTemplateID"));
+        assert!(sql.contains("COALESCE(qta.RewardMailDelay, 0) AS RewardMailDelay"));
+        assert!(sql.contains("COALESCE(qms.RewardMailSenderEntry, 0) AS RewardMailSenderEntry"));
+        assert!(sql.contains("LEFT JOIN quest_mail_sender qms ON qt.ID = qms.QuestId"));
+        assert!(sql.contains("qt.RewardFactionID1, qt.RewardFactionValue1"));
+        assert!(sql.contains("qt.RewardFactionID5, qt.RewardFactionValue5"));
+        assert!(sql.contains("qt.RewardFactionFlags"));
     }
 
     #[test]

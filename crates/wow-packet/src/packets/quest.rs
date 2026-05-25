@@ -434,6 +434,7 @@ pub struct QuestGiverQuestComplete {
     pub quest_id: u32,
     pub xp: u32,
     pub money: u32,
+    pub skill_line_id: u32,
     pub skill_points: u32,
     pub use_quest_reward_currency: bool,
 }
@@ -444,13 +445,33 @@ impl ServerPacket for QuestGiverQuestComplete {
         pkt.write_uint32(self.quest_id);
         pkt.write_uint32(self.xp);
         pkt.write_int64(self.money as i64);
+        pkt.write_uint32(self.skill_line_id);
         pkt.write_uint32(self.skill_points);
-        pkt.write_uint32(0); // SkillLineID
         pkt.write_bit(self.use_quest_reward_currency);
         pkt.write_bit(false); // LaunchGossip
         pkt.write_bit(false); // HideChatMessage
         pkt.write_bit(false); // ShowKeybind
         pkt.flush_bits();
+    }
+}
+
+// ── SMSG_QUEST_GIVER_QUEST_FAILED ───────────────────────────────────────────
+
+/// Quest turn-in failure reason.
+///
+/// C++ anchor: `QuestGiverQuestFailed::Write`, `QuestPackets.cpp:650-655`:
+/// `uint32 QuestID`, then `uint32 Reason`.
+pub struct QuestGiverQuestFailed {
+    pub quest_id: u32,
+    pub reason: u32,
+}
+
+impl ServerPacket for QuestGiverQuestFailed {
+    const OPCODE: ServerOpcodes = ServerOpcodes::QuestGiverQuestFailed;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.quest_id);
+        pkt.write_uint32(self.reason);
     }
 }
 
@@ -493,6 +514,11 @@ pub struct QueryQuestInfoResponse {
     pub reward_amounts: [u32; QUEST_REWARD_ITEM_COUNT],
     pub reward_display_spell: [u32; QUEST_REWARD_DISPLAY_SPELL_COUNT],
     pub reward_spell: u32,
+    pub reward_faction_ids: [u32; QUEST_REWARD_REPUTATIONS_COUNT],
+    pub reward_faction_values: [i32; QUEST_REWARD_REPUTATIONS_COUNT],
+    pub reward_faction_overrides: [i32; QUEST_REWARD_REPUTATIONS_COUNT],
+    pub reward_faction_cap_in: [i32; QUEST_REWARD_REPUTATIONS_COUNT],
+    pub reward_faction_flags: u32,
     pub objectives: Vec<QuestObjectiveInfo>,
     pub log_title: String,
     pub log_description: String,
@@ -569,13 +595,13 @@ impl ServerPacket for QueryQuestInfoResponse {
         pkt.write_int32(0); // PortraitGiverModelSceneID
         pkt.write_int32(0); // PortraitTurnIn
         // RewardFaction (5x4)
-        for _ in 0..QUEST_REWARD_REPUTATIONS_COUNT {
-            pkt.write_int32(0);
-            pkt.write_int32(0);
-            pkt.write_int32(0);
-            pkt.write_int32(0);
+        for i in 0..QUEST_REWARD_REPUTATIONS_COUNT {
+            pkt.write_int32(self.reward_faction_ids[i] as i32);
+            pkt.write_int32(self.reward_faction_values[i]);
+            pkt.write_int32(self.reward_faction_overrides[i]);
+            pkt.write_int32(self.reward_faction_cap_in[i]);
         }
-        pkt.write_uint32(0); // RewardFactionFlags
+        pkt.write_uint32(self.reward_faction_flags); // RewardFactionFlags
         // RewardCurrency (4x2)
         for _ in 0..QUEST_REWARD_CURRENCY_COUNT {
             pkt.write_int32(0);
@@ -812,6 +838,40 @@ impl ServerPacket for QuestUpdateAddCredit {
     }
 }
 
+// ── SMSG_QUEST_UPDATE_ADD_CREDIT_SIMPLE (0x2a8d) ────────────────────────────
+
+/// C++ `WorldPackets::Quest::QuestUpdateAddCreditSimple`.
+pub struct QuestUpdateAddCreditSimple {
+    pub quest_id: u32,
+    pub object_id: i32,
+    pub objective_type: u8,
+}
+
+impl ServerPacket for QuestUpdateAddCreditSimple {
+    const OPCODE: ServerOpcodes = ServerOpcodes::QuestUpdateAddCreditSimple;
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_int32(self.quest_id as i32);
+        pkt.write_int32(self.object_id);
+        pkt.write_uint8(self.objective_type);
+    }
+}
+
+// ── SMSG_QUEST_UPDATE_ADD_PVP_CREDIT (0x2a8e) ────────────────────────────────
+
+/// C++ `WorldPackets::Quest::QuestUpdateAddPvPCredit`.
+pub struct QuestUpdateAddPvpCredit {
+    pub quest_id: u32,
+    pub count: u16,
+}
+
+impl ServerPacket for QuestUpdateAddPvpCredit {
+    const OPCODE: ServerOpcodes = ServerOpcodes::QuestUpdateAddPvpCredit;
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_int32(self.quest_id as i32);
+        pkt.write_uint16(self.count);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -848,6 +908,58 @@ mod tests {
             ServerOpcodes::WorldQuestUpdateResponse as u16
         );
         assert_eq!(&bytes[2..], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn quest_giver_quest_failed_writes_quest_id_then_reason_like_cpp() {
+        let bytes = QuestGiverQuestFailed {
+            quest_id: 7008,
+            reason: 50,
+        }
+        .to_bytes();
+
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::QuestGiverQuestFailed as u16
+        );
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+        assert_eq!(pkt.read_uint32().unwrap(), 7008);
+        assert_eq!(pkt.read_uint32().unwrap(), 50);
+        assert!(pkt.is_empty());
+    }
+
+    #[test]
+    fn quest_update_add_pvp_credit_writes_cpp_shape() {
+        let bytes = QuestUpdateAddPvpCredit {
+            quest_id: 12_345,
+            count: 7,
+        }
+        .to_bytes();
+
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::QuestUpdateAddPvpCredit as u16
+        );
+        assert_eq!(&bytes[2..6], &12_345_i32.to_le_bytes());
+        assert_eq!(&bytes[6..8], &7_u16.to_le_bytes());
+    }
+
+    #[test]
+    fn quest_update_add_credit_simple_writes_cpp_shape() {
+        let bytes = QuestUpdateAddCreditSimple {
+            quest_id: 12_345,
+            object_id: -7,
+            objective_type: 14,
+        }
+        .to_bytes();
+
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::QuestUpdateAddCreditSimple as u16
+        );
+        assert_eq!(&bytes[2..6], &12_345_i32.to_le_bytes());
+        assert_eq!(&bytes[6..10], &(-7_i32).to_le_bytes());
+        assert_eq!(bytes[10], 14);
     }
 }
 
@@ -971,5 +1083,34 @@ mod quest_push_result_tests {
         let mut short = WorldPacket::from_bytes(&pkt.into_data());
 
         assert!(QuestPushResult::read(&mut short).is_err());
+    }
+}
+
+#[cfg(test)]
+mod quest_giver_quest_complete_tests {
+    use super::*;
+
+    #[test]
+    fn quest_giver_quest_complete_writes_skill_line_then_skill_ups_like_cpp() {
+        let complete = QuestGiverQuestComplete {
+            quest_id: 0x0102_0304,
+            xp: 0x0506_0708,
+            money: 0x0102_0304,
+            skill_line_id: 0x0A0B_0C0D,
+            skill_points: 0x0E0F_1011,
+            use_quest_reward_currency: true,
+        };
+
+        let bytes = complete.to_bytes();
+
+        assert_eq!(
+            QuestGiverQuestComplete::OPCODE,
+            ServerOpcodes::QuestGiverQuestComplete
+        );
+        assert_eq!(&bytes[2..6], &0x0102_0304u32.to_le_bytes());
+        assert_eq!(&bytes[6..10], &0x0506_0708u32.to_le_bytes());
+        assert_eq!(&bytes[10..18], &0x0102_0304u64.to_le_bytes());
+        assert_eq!(&bytes[18..22], &0x0A0B_0C0Du32.to_le_bytes());
+        assert_eq!(&bytes[22..26], &0x0E0F_1011u32.to_le_bytes());
     }
 }

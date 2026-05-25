@@ -37,7 +37,7 @@ use wow_packet::packets::trainer::{
 };
 
 use crate::conditions;
-use crate::session::WorldSession;
+use crate::session::{RepresentedQuestObjectiveProgressEventLikeCpp, WorldSession};
 
 const TRAINER_LIST_NPC_FLAGS_LIKE_CPP: u32 = NPCFlags1::TRAINER.bits();
 const TRAINER_BUY_NPC_FLAGS_LIKE_CPP: u32 = NPCFlags1::TRAINER.bits()
@@ -499,7 +499,15 @@ impl WorldSession {
         };
 
         // ── Deduct gold ────────────────────────────────────────────────────
-        self.set_player_gold_like_cpp(self.player_gold_like_cpp() - money_cost as u64);
+        let old_money = self.player_gold_like_cpp();
+        let new_money = old_money.saturating_sub(money_cost as u64);
+        self.enqueue_represented_quest_objective_progress_like_cpp(
+            RepresentedQuestObjectiveProgressEventLikeCpp::MoneyChanged {
+                old_money,
+                new_money,
+            },
+        );
+        self.set_player_gold_like_cpp(new_money);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
         upd_money.set_u64(0, self.player_gold_like_cpp());
         upd_money.set_u64(1, player_guid.counter() as u64);
@@ -525,6 +533,8 @@ impl WorldSession {
         // ── Update in-memory state ─────────────────────────────────────────
         self.learn_known_spell_like_cpp(spell_id);
         self.sync_player_registry_state_like_cpp();
+        self.drain_represented_quest_objective_progress_like_cpp()
+            .await;
 
         info!(
             account = self.account_id,

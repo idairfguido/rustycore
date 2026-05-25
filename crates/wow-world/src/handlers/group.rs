@@ -579,6 +579,7 @@ mod tests {
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.low_value()),
             account_id: 1,
+            recruiter_id: 0,
             race: 1,
             class: 1,
             sex: 0,

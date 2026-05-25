@@ -46,6 +46,10 @@ impl MapEntry {
         matches!(self.instance_type, MAP_INSTANCE | MAP_RAID | MAP_SCENARIO) && !self.is_garrison()
     }
 
+    pub const fn is_non_raid_dungeon_like_cpp(self) -> bool {
+        self.instance_type == MAP_INSTANCE
+    }
+
     pub const fn is_battleground_or_arena(self) -> bool {
         matches!(self.instance_type, MAP_BATTLEGROUND | MAP_ARENA)
     }

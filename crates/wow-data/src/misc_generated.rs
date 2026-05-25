@@ -1413,6 +1413,16 @@ impl LfgDungeonsStore {
             }
         })
     }
+
+    pub fn get_by_map_and_difficulty_like_cpp(
+        &self,
+        map_id: u32,
+        difficulty_id: u8,
+    ) -> Option<&LfgDungeonsEntry> {
+        self.entries
+            .values()
+            .find(|entry| entry.map_id == map_id as i16 && entry.difficulty_id == difficulty_id)
+    }
 }
 
 impl LanguageWordsStore {

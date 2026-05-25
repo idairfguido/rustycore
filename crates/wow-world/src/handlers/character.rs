@@ -48,6 +48,7 @@ use wow_packet::packets::quest::QuestGiverStatusMultiple;
 use wow_packet::packets::update::*;
 
 use crate::handlers::quest::RepresentedQuestGiverStatusSourceLikeCpp;
+use crate::reputation::mgr::CharacterReputationRowLikeCpp;
 
 // ── Handler registration ────────────────────────────────────────────
 
@@ -789,7 +790,7 @@ enum VendorExtendedCostBlock {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExtendedCostItemTurninChange {
+pub(crate) enum ExtendedCostItemTurninChange {
     Update {
         slot: u8,
         item_guid: ObjectGuid,
@@ -2472,6 +2473,7 @@ impl WorldSession {
                                     owner_guid: guid,
                                     contained_in: guid,
                                     stack_count: item_count,
+                                    dynamic_flags: stored_flags,
                                     durability: item_durability,
                                     max_durability: item_max_durability,
                                     random_properties_seed: 0,
@@ -2823,6 +2825,41 @@ impl WorldSession {
         self.set_loaded_player_identity_like_cpp(map_id as u16, race, class, level, gender);
         self.refresh_next_level_xp();
         // NOTE: known_spells is stored below after DBC merge (see "Merge DBC auto-learned spells")
+
+        // C++ login query set includes CHAR_SEL_CHARACTER_REPUTATION and
+        // ReputationMgr::LoadFromDB reinitializes from Faction.db2 before merging rows.
+        {
+            let mut reputation_stmt = char_db.prepare(CharStatements::SEL_CHARACTER_REPUTATION);
+            reputation_stmt.set_u64(0, guid.counter() as u64);
+            match char_db.query(&reputation_stmt).await {
+                Ok(mut reputation_result) => {
+                    let mut rows = Vec::new();
+                    if !reputation_result.is_empty() {
+                        loop {
+                            rows.push(CharacterReputationRowLikeCpp {
+                                faction_id: reputation_result.try_read(0).unwrap_or(0),
+                                standing: reputation_result.try_read(1).unwrap_or(0),
+                                flags: reputation_result.try_read(2).unwrap_or(0),
+                            });
+                            if !reputation_result.next_row() {
+                                break;
+                            }
+                        }
+                    }
+                    if self.load_character_reputation_rows_like_cpp(rows) {
+                        info!("Loaded character reputation rows for {:?}", guid);
+                    } else {
+                        warn!(
+                            "Skipped character reputation load for {:?}: missing Faction.db2 store",
+                            guid
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to load character reputation for {:?}: {}", guid, e);
+                }
+            }
+        }
 
         // Sum gear stat bonuses from equipped items (slots 0-18)
         let (gear_stats, gear_ap, gear_rap, gear_health, gear_mana) =
@@ -5771,7 +5808,7 @@ impl WorldSession {
         false
     }
 
-    fn plan_destroy_item_count_direct_inventory(
+    pub(crate) fn plan_destroy_item_count_direct_inventory(
         &self,
         item_entry: u32,
         count: u32,
@@ -5832,7 +5869,7 @@ impl WorldSession {
         None
     }
 
-    fn append_item_turnin_statements(
+    pub(crate) fn append_item_turnin_statements(
         char_db: &wow_database::CharacterDatabase,
         tx: &mut SqlTransaction,
         player_guid: ObjectGuid,
@@ -5862,7 +5899,7 @@ impl WorldSession {
         }
     }
 
-    fn apply_item_turnin_changes(
+    pub(crate) fn apply_item_turnin_changes(
         &mut self,
         _player_guid: ObjectGuid,
         map_id: u16,
@@ -6586,6 +6623,7 @@ impl WorldSession {
                     owner_guid: player_guid,
                     contained_in: player_guid,
                     stack_count,
+                    dynamic_flags: 0,
                     durability: max_durability,
                     max_durability,
                     random_properties_seed: 0,
@@ -7118,6 +7156,7 @@ impl WorldSession {
                     owner_guid: player_guid,
                     contained_in: player_guid,
                     stack_count,
+                    dynamic_flags: 0,
                     durability,
                     max_durability,
                     random_properties_seed: 0,
@@ -7609,6 +7648,7 @@ impl WorldSession {
                     owner_guid: player_guid,
                     contained_in: player_guid,
                     stack_count: stack.count,
+                    dynamic_flags: 0,
                     durability: stack.max_durability,
                     max_durability: stack.max_durability,
                     random_properties_seed: 0,
@@ -8810,7 +8850,10 @@ impl WorldSession {
         });
 
         // 16. InitializeFactions (1000 factions, all neutral)
-        self.send_packet(&InitializeFactions);
+        let initialize_factions = self
+            .reputation_mgr_like_cpp_mut()
+            .initialize_factions_packet_like_cpp();
+        self.send_packet(&initialize_factions);
 
         // 17. SetupCurrency (empty)
         self.send_packet(&SetupCurrency::empty());
@@ -9037,7 +9080,7 @@ mod tests {
     use super::*;
     use wow_data::quest::{
         QUEST_ITEM_DROP_COUNT, QUEST_REWARD_CHOICES_COUNT, QUEST_REWARD_DISPLAY_SPELL_COUNT,
-        QUEST_REWARD_ITEM_COUNT, QuestStore, QuestTemplate,
+        QUEST_REWARD_ITEM_COUNT, QUEST_REWARD_REPUTATIONS_COUNT, QuestStore, QuestTemplate,
     };
     use wow_packet::WorldPacket;
     use wow_packet::packets::loot::{
@@ -9081,6 +9124,7 @@ mod tests {
             quest_type: 2,
             quest_level: 1,
             quest_max_scaling_level: 0,
+            quest_package_id: 0,
             min_level: 1,
             quest_sort_id: 0,
             quest_info_id: 0,
@@ -9094,9 +9138,21 @@ mod tests {
             reward_display_spell: [0; QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            reward_title_id: 0,
+            reward_skill_line_id: 0,
+            reward_skill_points: 0,
+            reward_mail_template_id: 0,
+            reward_mail_delay_secs: 0,
+            reward_mail_sender_entry: 0,
+            reward_faction_ids: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_values: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_overrides: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_cap_in: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_flags: 0,
             source_item_id: 0,
             source_item_count: 0,
             source_spell_id: 0,
+            limit_time_secs: 0,
             expansion: 0,
             flags: 0,
             flags_ex: 0,
@@ -9105,6 +9161,8 @@ mod tests {
             event_id_for_quest: 0,
             reward_items: [0; QUEST_REWARD_ITEM_COUNT],
             reward_amounts: [0; QUEST_REWARD_ITEM_COUNT],
+            reward_currencies: [0; wow_data::quest::QUEST_REWARD_CURRENCY_COUNT],
+            reward_currency_amounts: [0; wow_data::quest::QUEST_REWARD_CURRENCY_COUNT],
             item_drop: [0; QUEST_ITEM_DROP_COUNT],
             item_drop_quantity: [0; QUEST_ITEM_DROP_COUNT],
             log_title: format!("Quest {id}"),
@@ -9127,6 +9185,7 @@ mod tests {
             required_max_rep_faction: 0,
             required_max_rep_value: 0,
             reward_choice_items: [(0, 0); QUEST_REWARD_CHOICES_COUNT],
+            reward_choice_item_types: [0; QUEST_REWARD_CHOICES_COUNT],
         }
     }
 

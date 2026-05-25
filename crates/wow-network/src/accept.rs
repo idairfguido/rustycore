@@ -55,6 +55,28 @@ impl Default for LootDropRatesLikeCpp {
     }
 }
 
+/// C++ `World::rate_values` subset used by reputation gain.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReputationRatesLikeCpp {
+    pub gain: f32,
+    pub low_level_kill: f32,
+    pub low_level_quest: f32,
+    pub recruit_a_friend_bonus: f32,
+    pub recruit_a_friend_distance: f32,
+}
+
+impl Default for ReputationRatesLikeCpp {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            low_level_kill: 1.0,
+            low_level_quest: 1.0,
+            recruit_a_friend_bonus: 0.1,
+            recruit_a_friend_distance: 100.0,
+        }
+    }
+}
+
 /// Resources needed for creating a WorldSession after authentication.
 ///
 /// Held by the accept loop and cloned for each connection.
@@ -73,6 +95,8 @@ pub struct SessionResources {
     pub item_store: Option<Arc<wow_data::ItemStore>>,
     pub item_modified_appearance_store: Option<Arc<wow_data::ItemModifiedAppearanceStore>>,
     pub item_price_base_store: Option<Arc<wow_data::ItemPriceBaseStore>>,
+    pub item_limit_category_store: Option<Arc<wow_data::ItemLimitCategoryStore>>,
+    pub item_limit_category_condition_store: Option<Arc<wow_data::ItemLimitCategoryConditionStore>>,
     pub player_stats: Option<Arc<wow_data::PlayerStatsStore>>,
     pub item_stats_store: Option<Arc<wow_data::ItemStatsStore>>,
     pub item_random_suffix_store: Option<Arc<wow_data::ItemRandomSuffixStore>>,
@@ -85,6 +109,11 @@ pub struct SessionResources {
     pub condition_store: Option<Arc<wow_data::ConditionEntriesByTypeStore>>,
     pub player_condition_store: Option<Arc<wow_data::PlayerConditionStore>>,
     pub content_tuning_store: Option<Arc<wow_data::progression_rewards::ContentTuningStore>>,
+    pub progression_faction_store: Option<Arc<wow_data::progression_rewards::FactionStore>>,
+    pub friendship_rep_reaction_store:
+        Option<Arc<wow_data::progression_rewards::FriendshipRepReactionStore>>,
+    pub paragon_reputation_store:
+        Option<Arc<wow_data::progression_rewards::ParagonReputationStore>>,
     pub disable_mgr: Option<Arc<wow_data::DisableMgrLikeCpp>>,
     pub lock_store: Option<Arc<wow_data::LockStore>>,
     pub spell_item_enchantment_store: Option<Arc<wow_data::SpellItemEnchantmentStore>>,
@@ -104,6 +133,7 @@ pub struct SessionResources {
     pub map_store: Option<Arc<wow_data::MapStore>>,
     pub map_difficulty_store: Option<Arc<wow_data::MapDifficultyStore>>,
     pub map_difficulty_x_condition_store: Option<Arc<wow_data::MapDifficultyXConditionStore>>,
+    pub lfg_dungeons_store: Option<Arc<wow_data::LfgDungeonsStore>>,
     pub creature_template_mount_store: Option<Arc<wow_data::CreatureTemplateMountStoreLikeCpp>>,
     pub creature_display_info_store: Option<Arc<wow_data::CreatureDisplayInfoStore>>,
     pub gameobject_display_info_store: Option<Arc<wow_data::GameObjectDisplayInfoStore>>,
@@ -122,6 +152,15 @@ pub struct SessionResources {
     pub quest_store: Option<Arc<wow_data::quest::QuestStore>>,
     pub quest_xp_store: Option<Arc<wow_data::quest_xp::QuestXpStore>>,
     pub quest_v2_store: Option<Arc<wow_data::progression_rewards::QuestV2Store>>,
+    pub quest_package_item_store: Option<Arc<wow_data::progression_rewards::QuestPackageItemStore>>,
+    pub quest_faction_reward_store:
+        Option<Arc<wow_data::progression_rewards::QuestFactionRewardStore>>,
+    pub reputation_reward_rate_store:
+        Option<Arc<wow_data::reputation::ReputationRewardRateStoreLikeCpp>>,
+    pub creature_onkill_reputation_store:
+        Option<Arc<wow_data::reputation::CreatureOnKillReputationStoreLikeCpp>>,
+    pub reputation_spillover_template_store:
+        Option<Arc<wow_data::reputation::RepSpilloverTemplateStoreLikeCpp>>,
     /// XP required per level: index = level (1-based), value = xp_needed.
     pub player_xp_table: Option<Arc<Vec<u32>>>,
     /// Shared registry of all active player sessions (for broadcast).
@@ -133,6 +172,7 @@ pub struct SessionResources {
     /// Pending party invites: invited_guid → inviter_guid.
     pub pending_invites: Option<Arc<PendingInvites>>,
     pub loot_drop_rates: LootDropRatesLikeCpp,
+    pub reputation_rates: ReputationRatesLikeCpp,
     pub enable_ae_loot: bool,
     pub realm_id: u16,
     /// External (public) IP from `realmlist.address`.

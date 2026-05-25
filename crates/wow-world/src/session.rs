@@ -23,6 +23,7 @@ use crate::phasing::{
     init_db_phase_shift_like_cpp, init_db_visible_map_id_like_cpp,
     party_member_phase_states_like_cpp,
 };
+use crate::reputation::{ReputationMgrLikeCpp, reputation_to_rank_like_cpp};
 use wow_constants::item::{CurrencyTypes, CurrencyTypesFlags};
 use wow_constants::movement::MovementFlag;
 use wow_constants::unit::{
@@ -41,10 +42,11 @@ use wow_data::{
     DisableWorldObjectRefLikeCpp, DungeonEncounterStore, FishingBaseSkillStoreLikeCpp,
     GameObjectDisplayInfoStore, HotfixBlobCache, ImportPriceStores, ItemAppearanceStore,
     ItemClassStore, ItemCurrencyCostStore, ItemDisenchantLootStore, ItemExtendedCostStore,
-    ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
-    ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
-    ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapDifficultyXConditionStore,
-    MapStore, MountCapabilityStore, MountStore, MountTypeXCapabilityStore, MountXDisplayStore,
+    ItemLimitCategoryConditionStore, ItemLimitCategoryStore, ItemModifiedAppearanceStore,
+    ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesStore,
+    ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore, ItemStatsStore, ItemStore,
+    LfgDungeonsStore, LockStore, MapDifficultyStore, MapDifficultyXConditionStore, MapStore,
+    MountCapabilityStore, MountStore, MountTypeXCapabilityStore, MountXDisplayStore,
     PhaseGroupStore, PhaseStore, PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp,
     PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
     PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
@@ -53,7 +55,15 @@ use wow_data::{
     SpellRangeStore, SpellStore, SummonPropertiesEntry, VEHICLE_SEAT_FLAG_CAN_ATTACK,
     VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
     is_player_meeting_condition_like_cpp,
-    progression_rewards::{ContentTuningStore, FactionStore, FactionTemplateStore, QuestV2Store},
+    progression_rewards::{
+        ContentTuningStore, FactionEntry, FactionStore, FactionTemplateStore,
+        FriendshipRepReactionStore, ParagonReputationStore, QuestFactionRewardStore,
+        QuestPackageItemStore, QuestV2Store,
+    },
+    reputation::{
+        CreatureOnKillReputationStoreLikeCpp, RepSpilloverTemplateStoreLikeCpp,
+        ReputationRewardRateStoreLikeCpp,
+    },
     spell_duration_ms_like_cpp, spell_effect_radius_like_cpp,
 };
 use wow_database::{
@@ -63,16 +73,16 @@ use wow_database::{
 use wow_entities::{
     AccessorObjectKind, ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef,
     ApplyEnchantmentTemplateRef, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_COUNT,
-    BUYBACK_SLOT_END, BUYBACK_SLOT_START, CanStoreItemArgs, CanUnequipItemArgs,
+    BUYBACK_SLOT_END, BUYBACK_SLOT_START, BagTemplateRef, CanStoreItemArgs, CanUnequipItemArgs,
     EQUIPMENT_SLOT_MAINHAND, GameObject, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0,
-    INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, Item, ItemCreateInfo, ItemPosCount,
-    ItemSlotRef, ItemStorageRef, ItemStorageTemplate, MAX_ITEM_SPELLS, NULL_BAG, NULL_SLOT,
-    ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player, PlayerEnchantTimeUpdate,
-    PlayerInventoryStorage, PlayerItemTimeUpdate, QUESTS_COMPLETED_BITS_PER_BLOCK,
-    QUESTS_COMPLETED_BITS_SIZE, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START, SendNewItemDelivery,
-    SendNewItemDisplayText, SendNewItemPlan, UNIT_DATA_HEALTH_BIT, UnitDataUpdate, UnitDataValues,
-    UpdateMask, Vehicle, VehicleAccessory, VisibleItemValues, WorldObject, is_bag_pos,
-    is_equipment_packed_pos, make_item_pos,
+    INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, Item, ItemCreateInfo,
+    ItemLimitCategoryTemplate, ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate,
+    MAX_ITEM_SPELLS, NULL_BAG, NULL_SLOT, ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player,
+    PlayerEnchantTimeUpdate, PlayerInventoryStorage, PlayerItemTimeUpdate,
+    QUESTS_COMPLETED_BITS_PER_BLOCK, QUESTS_COMPLETED_BITS_SIZE, REAGENT_BAG_SLOT_END,
+    REAGENT_BAG_SLOT_START, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
+    UNIT_DATA_HEALTH_BIT, UnitDataUpdate, UnitDataValues, UpdateMask, Vehicle, VehicleAccessory,
+    VisibleItemValues, WorldObject, is_bag_pos, is_equipment_packed_pos, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_loot::{LootStoreKind, LootStores};
@@ -80,7 +90,7 @@ use wow_network::session_mgr::{InstanceLink, SessionManager};
 use wow_network::{
     GameEventQuestCompleteClientOutcomeLikeCpp, GameEventQuestCompleteCommandLikeCpp,
     GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerBroadcastInfo, PlayerRegistry,
-    SessionCommand,
+    ReputationRatesLikeCpp, SessionCommand,
 };
 use wow_packet::packets::item::{
     InventoryChangeFailure, ItemEnchantTimeUpdate, ItemInstance, ItemMod, ItemModList,
@@ -97,11 +107,17 @@ use wow_recastdetour::PathQueryFilterContext;
 
 const QUEST_OBJECTIVE_ITEM_LIKE_CPP: u8 = 1;
 const QUEST_OBJECTIVE_CURRENCY_LIKE_CPP: u8 = 4;
+const QUEST_OBJECTIVE_MIN_REPUTATION_LIKE_CPP: u8 = 6;
+const QUEST_OBJECTIVE_MAX_REPUTATION_LIKE_CPP: u8 = 7;
 const QUEST_OBJECTIVE_MONEY_LIKE_CPP: u8 = 8;
+const QUEST_OBJECTIVE_PLAYERKILLS_LIKE_CPP: u8 = 9;
+const QUEST_OBJECTIVE_HAVE_CURRENCY_LIKE_CPP: u8 = 16;
+const QUEST_OBJECTIVE_OBTAIN_CURRENCY_LIKE_CPP: u8 = 17;
+const QUEST_OBJECTIVE_INCREASE_REPUTATION_LIKE_CPP: u8 = 18;
+const QUEST_OBJECTIVE_FLAG_KILL_PLAYERS_SAME_FACTION_LIKE_CPP: u32 = 0x0080;
 const QUEST_OBJECTIVE_FLAG_2_QUEST_BOUND_ITEM_LIKE_CPP: u32 = 0x1;
 const PLAYER_FLAGS_UBER_LIKE_CPP: u32 = 0x0008_0000;
 const PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP: u32 = 0x0000_0100;
-const FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP: u16 = 0x0000_1000;
 
 fn quest_has_represented_item_objective_like_cpp(quest: &wow_data::quest::QuestTemplate) -> bool {
     quest
@@ -254,9 +270,10 @@ pub(crate) enum RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp {
     ReceiverCanTakeQuestFailed,
     ReceiverCanAddQuestLogFull,
     ReceiverCanAddQuestSourceItemFailed,
-    ReceiverCanAddQuestSourceItemLimitCategoryUnrepresented,
     ReceiverGiveQuestSourceItemStartQuestNoGrant,
     ReceiverGiveQuestSourceItemMaxCountNoGrant,
+    ReceiverGiveQuestSourceItemStoredNewItem,
+    ReceiverGiveQuestSourceItemBoundObjectiveNoGrant,
     GiveQuestSourceItemStoreNewItemUnrepresented,
     ReceiverAddQuestLocalStateRepresented,
     AddQuestRuntimeUnrepresented,
@@ -280,6 +297,132 @@ pub(crate) struct RepresentedQuestConfirmAcceptLikeCpp {
     pub represented_source_spell_id: Option<u32>,
     /// Count of represented triggered self-casts C++ would perform in this shared-confirm path.
     pub represented_source_spell_self_casts: u8,
+}
+
+/// Evidence for represented `Player::CompleteQuest` status-update side effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedQuestCompleteStatusUpdateLikeCpp {
+    pub quest_id: u32,
+    pub old_status: u8,
+    pub new_status: u8,
+    pub send_quest_update_called: bool,
+    pub quest_slot_state_complete_represented: bool,
+    pub quest_slot_state_live_update_unrepresented: bool,
+    pub visible_gameobjects_or_spellclicks_refresh_unrepresented: bool,
+    pub spell_area_runtime_unrepresented: bool,
+    pub tracking_event_auto_reward_unrepresented: bool,
+    pub quest_tracker_complete_time_unrepresented: bool,
+    pub script_status_change_unrepresented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedQuestRewardSpellKindLikeCpp {
+    RewardSpell,
+    RewardDisplaySpell { index: u8 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedQuestRewardSpellCastLikeCpp {
+    pub quest_id: u32,
+    pub spell_id: u32,
+    pub kind: RepresentedQuestRewardSpellKindLikeCpp,
+    pub spell_info_lookup_unrepresented: bool,
+    pub caster_selection_unrepresented: bool,
+    pub cast_spell_runtime_unrepresented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedQuestRewardTitleLikeCpp {
+    pub quest_id: u32,
+    pub title_id: u32,
+    pub char_title_lookup_unrepresented: bool,
+    pub set_title_runtime_unrepresented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedQuestRewardTalentPointsLikeCpp {
+    pub quest_id: u32,
+    pub points: u32,
+    pub init_talent_for_level_unrepresented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedQuestRewardMailLikeCpp {
+    pub quest_id: u32,
+    pub mail_template_id: u32,
+    pub delay_secs: u32,
+    pub sender_entry: Option<u32>,
+    pub quest_giver_guid: Option<ObjectGuid>,
+    pub mail_template_lookup_unrepresented: bool,
+    pub mail_draft_runtime_unrepresented: bool,
+    pub character_db_transaction_unrepresented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedQuestRewardReputationSourceLikeCpp {
+    Quest,
+    DailyQuest,
+    WeeklyQuest,
+    MonthlyQuest,
+    RepeatableQuest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedQuestRewardReputationLikeCpp {
+    pub quest_id: u32,
+    pub slot: u8,
+    pub faction_id: u32,
+    pub reward_faction_value: i32,
+    pub reward_faction_override: i32,
+    pub reward_faction_cap_in: i32,
+    pub base_reputation_before_gain: i32,
+    pub reputation_after_low_level_rate_like_cpp: i32,
+    pub reputation_after_reward_rate_like_cpp: i32,
+    pub no_quest_bonus: bool,
+    pub no_spillover: bool,
+    pub source: RepresentedQuestRewardReputationSourceLikeCpp,
+    pub faction_store_lookup_unrepresented: bool,
+    pub quest_faction_reward_store_lookup_unrepresented: bool,
+    pub reputation_reward_rate_lookup_unrepresented: bool,
+    pub gray_level_script_hook_unrepresented: bool,
+    pub reputation_rank_cap_check_unrepresented: bool,
+    pub calculate_reputation_gain_unrepresented: bool,
+    pub modify_reputation_runtime_unrepresented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedFactionReactionInputLikeCpp {
+    pub source_faction_template_id: u32,
+    pub target_faction_template_id: u32,
+    pub target_has_player_owner: bool,
+    pub target_player_owner_is_current_session: bool,
+    pub target_player_contested_pvp: bool,
+    pub target_is_unit: bool,
+    pub target_ignores_reputation: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedGetReactionInputLikeCpp {
+    pub self_faction_template_id: u32,
+    pub target_faction_template_id: u32,
+    pub same_object: bool,
+    pub attackable_by_summoner: bool,
+    pub same_charmer_or_owner_or_self: bool,
+    pub self_has_player_owner: bool,
+    pub target_has_player_owner: bool,
+    pub target_player_owner_is_current_session: bool,
+    pub target_owner_forced_rank_for_self: Option<wow_data::reputation::ReputationRankLikeCpp>,
+    pub same_player_owner: bool,
+    pub duel_in_progress: bool,
+    pub same_raid: bool,
+    pub self_unit_player_controlled: bool,
+    pub target_unit_player_controlled: bool,
+    pub self_ffa_pvp: bool,
+    pub target_ffa_pvp: bool,
+    pub self_ignores_reputation: bool,
+    pub target_ignores_reputation: bool,
+    pub target_is_unit: bool,
+    pub target_player_contested_pvp: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1446,6 +1589,7 @@ pub struct WorldSession {
     // Account info
     pub account_id: u32,
     battlenet_account_id: u32,
+    recruiter_id_like_cpp: u32,
     pub account_name: String,
     pub security: u8,
     pub expansion: u8,
@@ -1507,11 +1651,18 @@ pub struct WorldSession {
     // Item price base store (ItemPriceBase.db2 data)
     item_price_base_store: Option<Arc<ItemPriceBaseStore>>,
 
+    // Item limit category store (ItemLimitCategory.db2 data)
+    item_limit_category_store: Option<Arc<ItemLimitCategoryStore>>,
+
+    // Item limit category condition store (ItemLimitCategoryCondition.db2 data)
+    item_limit_category_condition_store: Option<Arc<ItemLimitCategoryConditionStore>>,
+
     // Player level stats store (race/class/level → base stats)
     player_stats: Option<Arc<PlayerStatsStore>>,
 
     // Item stat modifiers store (item_id → stat bonuses from ItemSparse.db2)
     item_stats_store: Option<Arc<ItemStatsStore>>,
+    item_template_addon_quest_log_item_ids_like_cpp: HashMap<u32, u32>,
 
     // Item random suffix store (ItemRandomSuffix.db2 data)
     item_random_suffix_store: Option<Arc<ItemRandomSuffixStore>>,
@@ -1577,8 +1728,15 @@ pub struct WorldSession {
     map_store: Option<Arc<MapStore>>,
     map_difficulty_store: Option<Arc<MapDifficultyStore>>,
     map_difficulty_x_condition_store: Option<Arc<MapDifficultyXConditionStore>>,
+    lfg_dungeons_store: Option<Arc<LfgDungeonsStore>>,
     faction_store: Option<Arc<FactionStore>>,
+    friendship_rep_reaction_store: Option<Arc<FriendshipRepReactionStore>>,
+    paragon_reputation_store: Option<Arc<ParagonReputationStore>>,
     faction_template_store: Option<Arc<FactionTemplateStore>>,
+    reputation_reward_rate_store: Option<Arc<ReputationRewardRateStoreLikeCpp>>,
+    creature_onkill_reputation_store: Option<Arc<CreatureOnKillReputationStoreLikeCpp>>,
+    reputation_spillover_template_store: Option<Arc<RepSpilloverTemplateStoreLikeCpp>>,
+    championing_faction_like_cpp: u32,
     creature_template_mount_store: Option<Arc<CreatureTemplateMountStoreLikeCpp>>,
     creature_display_info_store: Option<Arc<CreatureDisplayInfoStore>>,
     gameobject_display_info_store: Option<Arc<GameObjectDisplayInfoStore>>,
@@ -1615,6 +1773,7 @@ pub struct WorldSession {
     pub(crate) pass_on_group_loot: bool,
     pub(crate) represented_enchanting_skill: u16,
     player_skill_values_like_cpp: HashMap<u16, u16>,
+    represented_gray_level_script_overrides_like_cpp: HashMap<u8, u8>,
 
     // Realm ID for GUID creation
     realm_id: u16,
@@ -1709,6 +1868,9 @@ pub struct WorldSession {
 
     /// C++ `_currencyStorage`, keyed by CurrencyTypes.db2 ID.
     player_currencies: HashMap<u32, PlayerCurrency>,
+    represented_quest_objective_progress_events_like_cpp:
+        VecDeque<RepresentedQuestObjectiveProgressEventLikeCpp>,
+    represented_quest_objective_progress_draining_like_cpp: bool,
 
     /// In-memory item objects keyed by item GUID, mirroring C++ `Player::m_items` ownership.
     inventory_item_objects: HashMap<ObjectGuid, Item>,
@@ -1954,6 +2116,8 @@ pub struct WorldSession {
     pub(crate) quest_pool_store: Option<Arc<wow_data::quest::QuestPoolStoreLikeCpp>>,
     pub(crate) quest_xp_store: Option<Arc<wow_data::quest_xp::QuestXpStore>>,
     pub(crate) quest_v2_store: Option<Arc<QuestV2Store>>,
+    pub(crate) quest_package_item_store: Option<Arc<QuestPackageItemStore>>,
+    pub(crate) quest_faction_reward_store: Option<Arc<QuestFactionRewardStore>>,
     pub(crate) player_xp_table: Option<Arc<Vec<u32>>>,
     /// Active quests for this player: quest_id → status.
     pub(crate) player_quests: HashMap<u32, crate::handlers::quest::PlayerQuestStatus>,
@@ -1964,10 +2128,33 @@ pub struct WorldSession {
     pub(crate) daily_quests_completed_like_cpp: HashSet<u32>,
     /// C++ `Player::m_DFQuests`, represented per-session until full Player runtime owns it.
     pub(crate) df_quests_like_cpp: HashSet<u32>,
+    /// C++ `Player::m_weeklyquests`, represented per-session until full Player runtime owns it.
+    pub(crate) weekly_quests_completed_like_cpp: HashSet<u32>,
+    /// C++ `Player::m_monthlyquests`, represented per-session until full Player runtime owns it.
+    pub(crate) monthly_quests_completed_like_cpp: HashSet<u32>,
+    /// C++ `Player::m_lastDailyQuestTime`, represented for daily/DF quest status persistence.
+    pub(crate) last_daily_quest_time_like_cpp: i64,
     /// C++ `Player::m_seasonalquests`, represented per-session until full Player runtime owns it.
     pub(crate) seasonal_quests_like_cpp: BTreeMap<u16, BTreeMap<u32, u64>>,
     /// C++ `Player::m_SeasonalQuestChanged` represented flag.
     pub(crate) seasonal_quest_changed_like_cpp: bool,
+    /// Session-local evidence for represented `Player::RemoveTimedQuest` calls.
+    pub(crate) represented_timed_quest_removals_like_cpp: Vec<u32>,
+    /// Session-local evidence for represented quest reward `Player::UpdateSkillPro` calls.
+    pub(crate) represented_quest_reward_skill_updates_like_cpp: Vec<(u32, u32)>,
+    /// Session-local evidence for represented quest reward triggered spell casts.
+    pub(crate) represented_quest_reward_spell_casts_like_cpp:
+        Vec<RepresentedQuestRewardSpellCastLikeCpp>,
+    /// Session-local evidence for represented quest reward `SetTitle` calls.
+    pub(crate) represented_quest_reward_titles_like_cpp: Vec<RepresentedQuestRewardTitleLikeCpp>,
+    /// Session-local evidence for represented quest reward talent point grants.
+    pub(crate) represented_quest_reward_talent_points_like_cpp:
+        Vec<RepresentedQuestRewardTalentPointsLikeCpp>,
+    /// Session-local evidence for represented quest reward mail.
+    pub(crate) represented_quest_reward_mails_like_cpp: Vec<RepresentedQuestRewardMailLikeCpp>,
+    /// Session-local evidence for represented quest reward reputation.
+    pub(crate) represented_quest_reward_reputations_like_cpp:
+        Vec<RepresentedQuestRewardReputationLikeCpp>,
     /// Bridge for quest completed unique-bit state loaded before the canonical Player snapshot exists.
     pub(crate) represented_quest_completed_bits_like_cpp: BTreeSet<u32>,
     /// Session-local evidence for represented `ScriptMgr::OnQuestAcknowledgeAutoAccept` calls.
@@ -1983,6 +2170,9 @@ pub struct WorldSession {
     /// Evidence for represented `HandleQuestConfirmAccept` after clear + template lookup.
     pub(crate) represented_quest_confirm_accepts_like_cpp:
         Vec<RepresentedQuestConfirmAcceptLikeCpp>,
+    /// Evidence for represented `Player::CompleteQuest` status-update side effects.
+    pub(crate) represented_quest_complete_status_updates_like_cpp:
+        Vec<RepresentedQuestCompleteStatusUpdateLikeCpp>,
     /// Session-local evidence for represented sender-side `HandlePushQuestToParty` preflight.
     pub(crate) represented_push_quest_to_party_outcomes_like_cpp:
         Vec<RepresentedPushQuestToPartyOutcomeLikeCpp>,
@@ -2004,6 +2194,12 @@ pub struct WorldSession {
     pub(crate) represented_gameobject_criteria_events: Vec<RepresentedGameObjectCriteriaEvent>,
     /// C++ `sWorld->getRate(...)` subset used by represented loot generation.
     loot_drop_rates: LootDropRatesLikeCpp,
+    /// C++ `sWorld->getRate(...)` subset used by represented reputation gain.
+    reputation_rates: ReputationRatesLikeCpp,
+    /// C++ `ReputationMgr` per-player state foundation.
+    reputation_mgr_like_cpp: ReputationMgrLikeCpp,
+    /// C++ `ActivePlayerData::WatchedFactionIndex` represented state.
+    watched_faction_index_like_cpp: i32,
     /// C++ `CONFIG_ENABLE_AE_LOOT` represented switch.
     enable_ae_loot_like_cpp: bool,
     /// C++ `CONFIG_ENABLE_MMAPS` + `DataDir` represented until map lifecycle owns real mmaps.
@@ -2223,12 +2419,31 @@ pub(crate) struct PlayerCurrencyDelta {
     pub suppress_chat_log: bool,
 }
 
-fn player_team_for_race_cpp(race: u8) -> Team {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedQuestObjectiveProgressEventLikeCpp {
+    MoneyChanged { old_money: u64, new_money: u64 },
+    CurrencyChanged { currency_id: u32, change: i32 },
+    ReputationChanged { faction_id: u32, change: i32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CurrencyGainSourceLikeCpp {
+    QuestReward = 3,
+    QuestRewardIgnoreCaps = 29,
+    WorldQuestReward = 35,
+    WorldQuestRewardIgnoreCaps = 36,
+    DailyQuestReward = 38,
+    WeeklyQuestReward = 40,
+}
+
+pub(crate) fn player_team_for_race_cpp(race: u8) -> Team {
     match race {
         2 | 5 | 6 | 8 | 9 | 10 | 26 | 27 | 28 | 31 | 35 | 36 | 70 => Team::Horde,
         _ => Team::Alliance,
     }
 }
+
+const WRATH_OF_THE_LICH_KING_MAX_LEVEL_LIKE_CPP: u8 = 80;
 
 fn player_team_id_for_race_cpp(race: u8) -> u32 {
     match player_team_for_race_cpp(race) {
@@ -2274,6 +2489,8 @@ pub struct AuraApplication {
     pub represented_effect: Option<RepresentedAuraEffectLikeCpp>,
     /// C++ `GetTotalAuraModifier` amount for represented integer aura effects.
     pub represented_amount: i32,
+    /// C++ aura misc value used by represented `GetTotalAuraModifierByMiscValue` lookups.
+    pub represented_misc_value: Option<i32>,
     /// C++ `GetTotalAuraMultiplier` factor for represented multiplier aura effects.
     pub represented_multiplier: f32,
     /// Monotonic timestamp when this aura was applied — used for expiry checks.
@@ -2296,8 +2513,21 @@ pub enum RepresentedAuraEffectLikeCpp {
     Mounted,
     MountedFlightSpeed,
     ModifyFallDamagePct,
+    ModFactionReputationGain,
+    ModReputationGain,
     Stealth,
     WaterWalk,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReputationGainSourceLikeCpp {
+    Kill,
+    Quest,
+    DailyQuest,
+    WeeklyQuest,
+    MonthlyQuest,
+    RepeatableQuest,
+    Spell,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2377,6 +2607,12 @@ pub(crate) enum RepresentedCreatureKillEventLikeCpp {
         killer_guid: ObjectGuid,
         creature_guid: ObjectGuid,
     },
+    CreatureKillReputationAwarded {
+        creature_guid: ObjectGuid,
+        faction_id: u32,
+        reputation: i32,
+        spillover_only: bool,
+    },
 }
 
 /// A creature waiting to respawn after its corpse despawned.
@@ -2436,6 +2672,7 @@ impl WorldSession {
         Self {
             account_id,
             battlenet_account_id: account_id,
+            recruiter_id_like_cpp: 0,
             account_name,
             security,
             expansion,
@@ -2462,8 +2699,11 @@ impl WorldSession {
             item_appearance_store: None,
             item_modified_appearance_store: None,
             item_price_base_store: None,
+            item_limit_category_store: None,
+            item_limit_category_condition_store: None,
             player_stats: None,
             item_stats_store: None,
+            item_template_addon_quest_log_item_ids_like_cpp: HashMap::new(),
             item_random_suffix_store: None,
             item_random_properties_store: None,
             rand_prop_points_store: None,
@@ -2487,8 +2727,15 @@ impl WorldSession {
             map_store: None,
             map_difficulty_store: None,
             map_difficulty_x_condition_store: None,
+            lfg_dungeons_store: None,
             faction_store: None,
+            friendship_rep_reaction_store: None,
+            paragon_reputation_store: None,
             faction_template_store: None,
+            reputation_reward_rate_store: None,
+            creature_onkill_reputation_store: None,
+            reputation_spillover_template_store: None,
+            championing_faction_like_cpp: 0,
             creature_template_mount_store: None,
             creature_display_info_store: None,
             gameobject_display_info_store: None,
@@ -2513,6 +2760,7 @@ impl WorldSession {
             pass_on_group_loot: false,
             represented_enchanting_skill: 0,
             player_skill_values_like_cpp: HashMap::new(),
+            represented_gray_level_script_overrides_like_cpp: HashMap::new(),
             realm_id: 1,
             guid_generator: None,
             legit_characters: Vec::new(),
@@ -2552,6 +2800,8 @@ impl WorldSession {
             buyback_timestamp: [0; BUYBACK_SLOT_COUNT],
             current_buyback_slot: BUYBACK_SLOT_START,
             player_currencies: HashMap::new(),
+            represented_quest_objective_progress_events_like_cpp: VecDeque::new(),
+            represented_quest_objective_progress_draining_like_cpp: false,
             inventory_item_objects: HashMap::new(),
             current_map_id: 0,
             player_race: 0,
@@ -2661,18 +2911,31 @@ impl WorldSession {
             quest_pool_store: None,
             quest_xp_store: None,
             quest_v2_store: None,
+            quest_package_item_store: None,
+            quest_faction_reward_store: None,
             player_quests: HashMap::new(),
             rewarded_quests: std::collections::HashSet::new(),
             daily_quests_completed_like_cpp: HashSet::new(),
             df_quests_like_cpp: HashSet::new(),
+            weekly_quests_completed_like_cpp: HashSet::new(),
+            monthly_quests_completed_like_cpp: HashSet::new(),
+            last_daily_quest_time_like_cpp: 0,
             seasonal_quests_like_cpp: BTreeMap::new(),
             seasonal_quest_changed_like_cpp: false,
+            represented_timed_quest_removals_like_cpp: Vec::new(),
+            represented_quest_reward_skill_updates_like_cpp: Vec::new(),
+            represented_quest_reward_spell_casts_like_cpp: Vec::new(),
+            represented_quest_reward_titles_like_cpp: Vec::new(),
+            represented_quest_reward_talent_points_like_cpp: Vec::new(),
+            represented_quest_reward_mails_like_cpp: Vec::new(),
+            represented_quest_reward_reputations_like_cpp: Vec::new(),
             represented_quest_completed_bits_like_cpp: BTreeSet::new(),
             represented_auto_accept_acknowledged_quests_like_cpp: Vec::new(),
             represented_pending_quest_sharing_like_cpp: None,
             represented_quest_push_result_responses_like_cpp: Vec::new(),
             represented_quest_push_result_sender_mismatch_count_like_cpp: 0,
             represented_quest_confirm_accepts_like_cpp: Vec::new(),
+            represented_quest_complete_status_updates_like_cpp: Vec::new(),
             represented_push_quest_to_party_outcomes_like_cpp: Vec::new(),
             active_spell_cast: None,
             last_spell_cast_time: None,
@@ -2686,6 +2949,9 @@ impl WorldSession {
             #[cfg(test)]
             represented_gameobject_criteria_events: Vec::new(),
             loot_drop_rates: LootDropRatesLikeCpp::default(),
+            reputation_rates: ReputationRatesLikeCpp::default(),
+            reputation_mgr_like_cpp: ReputationMgrLikeCpp::new_like_cpp(),
+            watched_faction_index_like_cpp: -1,
             enable_ae_loot_like_cpp: false,
             mmap_runtime_config_like_cpp: MMapRuntimeConfigLikeCpp::default(),
             represented_unique_gameobject_uses: std::collections::HashSet::new(),
@@ -2794,6 +3060,7 @@ impl WorldSession {
         player.set_xp(self.player_xp_like_cpp() as i32);
         player.set_next_level_xp(self.player_next_level_xp_like_cpp() as i32);
         player.set_money(self.player_gold_like_cpp());
+        player.set_watched_faction_index_like_cpp(self.watched_faction_index_like_cpp);
         for quest_bit in &self.represented_quest_completed_bits_like_cpp {
             player.set_quest_completed_bit_like_cpp(*quest_bit, true);
         }
@@ -3094,8 +3361,7 @@ impl WorldSession {
                 let faction_id = u32::from(entry.faction);
                 AttackReputationFactionSnapshotLikeCpp {
                     faction_id,
-                    contested_guard: entry.flags & FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP
-                        != 0,
+                    contested_guard: entry.is_contested_guard_faction_like_cpp(),
                     can_have_reputation: self.faction_store.as_ref().and_then(|store| {
                         store
                             .get(faction_id)
@@ -4994,6 +5260,14 @@ impl WorldSession {
         self.battlenet_account_id
     }
 
+    pub fn set_recruiter_id_like_cpp(&mut self, recruiter_id: u32) {
+        self.recruiter_id_like_cpp = recruiter_id;
+    }
+
+    pub(crate) fn recruiter_id_like_cpp(&self) -> u32 {
+        self.recruiter_id_like_cpp
+    }
+
     /// Get the character database reference.
     pub fn char_db(&self) -> Option<&Arc<CharacterDatabase>> {
         self.char_db.as_ref()
@@ -5048,6 +5322,57 @@ impl WorldSession {
             .as_ref()
             .and_then(|store| store.get(item_level))
             .map(|entry| (entry.armor, entry.weapon))
+    }
+
+    /// Set the C++ ItemLimitCategory.db2 store for this session.
+    pub fn set_item_limit_category_store(&mut self, store: Arc<ItemLimitCategoryStore>) {
+        self.item_limit_category_store = Some(store);
+    }
+
+    /// Set the C++ ItemLimitCategoryCondition.db2 store for this session.
+    pub fn set_item_limit_category_condition_store(
+        &mut self,
+        store: Arc<ItemLimitCategoryConditionStore>,
+    ) {
+        self.item_limit_category_condition_store = Some(store);
+    }
+
+    /// C++ `sItemLimitCategoryStore.LookupEntry(limitCategory)`.
+    pub(crate) fn item_limit_category_template_like_cpp(
+        &self,
+        limit_category_id: u32,
+    ) -> Option<ItemLimitCategoryTemplate> {
+        if limit_category_id == 0 {
+            return None;
+        }
+
+        let entry = self
+            .item_limit_category_store
+            .as_ref()
+            .and_then(|store| store.get(limit_category_id))?;
+
+        let mut quantity = entry.quantity;
+        if let Some(condition_store) = self.item_limit_category_condition_store.as_ref() {
+            let context_holder = self.represented_player_condition_context_like_cpp();
+            let context = context_holder.as_context(self);
+            for condition in condition_store.conditions_for_parent_like_cpp(entry.id) {
+                let player_condition = self
+                    .player_condition_store
+                    .as_ref()
+                    .and_then(|store| store.get(condition.player_condition_id));
+                if player_condition.is_none_or(|condition| {
+                    is_player_meeting_condition_like_cpp(condition, &context)
+                }) {
+                    quantity = (i16::from(quantity) + i16::from(condition.add_quantity)) as u8;
+                }
+            }
+        }
+
+        Some(ItemLimitCategoryTemplate {
+            id: entry.id,
+            quantity,
+            flags: entry.flags,
+        })
     }
 
     /// C++ `Item::GetBuyPrice(proto, quality, itemLevel, standardPrice)`.
@@ -5473,6 +5798,108 @@ impl WorldSession {
         Ok(Some(delta))
     }
 
+    /// C++ `Player::AddCurrency(..., CurrencyGainSource::*QuestReward*)`.
+    ///
+    /// This represented seam intentionally fails closed for award conditions and reputation
+    /// conversion currencies until those runtime systems are available to quest rewards.
+    pub(crate) fn add_currency_quest_reward_like_cpp(
+        &mut self,
+        currency_id: u32,
+        amount: u32,
+        gain_source: CurrencyGainSourceLikeCpp,
+    ) -> Result<Option<PlayerCurrencyDelta>, ()> {
+        if amount == 0 {
+            return Ok(None);
+        }
+
+        let Some(entry) = self
+            .currency_types_store
+            .as_ref()
+            .and_then(|store| store.get(currency_id))
+            .copied()
+        else {
+            return Err(());
+        };
+
+        let player_team = player_team_for_race_cpp(self.player_race_like_cpp());
+        if (entry.is_alliance() && player_team != Team::Alliance)
+            || (entry.is_horde() && player_team != Team::Horde)
+        {
+            return Ok(None);
+        }
+
+        if entry.award_condition_id != 0 {
+            return Err(());
+        }
+        if entry.faction_id != 0 || currency_id == CurrencyTypes::Azerite as u32 {
+            return Ok(None);
+        }
+
+        let ignore_caps = matches!(
+            gain_source,
+            CurrencyGainSourceLikeCpp::QuestRewardIgnoreCaps
+                | CurrencyGainSourceLikeCpp::WorldQuestRewardIgnoreCaps
+        );
+        let mut currencies = self.player_currencies_like_cpp().clone();
+        let currency = currencies.entry(currency_id).or_insert(PlayerCurrency {
+            state: PlayerCurrencyState::New,
+            quantity: 0,
+            weekly_quantity: 0,
+            tracked_quantity: 0,
+            increased_cap_quantity: 0,
+            earned_quantity: 0,
+            flags: 0,
+        });
+
+        let weekly_cap = entry.max_earnable_per_week;
+        let mut applied = amount;
+        if !ignore_caps {
+            if weekly_cap != 0 && currency.weekly_quantity.saturating_add(applied) > weekly_cap {
+                applied = weekly_cap.saturating_sub(currency.weekly_quantity);
+            }
+
+            let max_quantity = currency_max_quantity_cpp(&entry, currency);
+            if max_quantity != 0 && currency.quantity.saturating_add(applied) > max_quantity {
+                applied = max_quantity.saturating_sub(currency.quantity);
+            }
+        }
+
+        if applied == 0 {
+            return Ok(None);
+        }
+
+        if currency.state != PlayerCurrencyState::New {
+            currency.state = PlayerCurrencyState::Changed;
+        }
+        currency.quantity = currency.quantity.saturating_add(applied);
+        if !ignore_caps {
+            if weekly_cap != 0 {
+                currency.weekly_quantity = currency.weekly_quantity.saturating_add(applied);
+            }
+            if entry.is_tracking_quantity() {
+                currency.tracked_quantity = currency.tracked_quantity.saturating_add(applied);
+            }
+            if entry.has_total_earned() {
+                currency.earned_quantity = currency.earned_quantity.saturating_add(applied);
+            }
+        }
+
+        let scaler = entry.scaler().max(1) as u32;
+        let max_quantity = currency_max_quantity_cpp(&entry, currency);
+        let delta = PlayerCurrencyDelta {
+            currency_id,
+            quantity: currency.quantity,
+            amount: applied,
+            weekly_quantity: ((currency.weekly_quantity / scaler) > 0)
+                .then_some(currency.weekly_quantity),
+            max_quantity: (max_quantity != 0).then_some(max_quantity),
+            total_earned: entry.has_total_earned().then_some(currency.earned_quantity),
+            suppress_chat_log: entry.is_suppressing_chat_log(false),
+        };
+        self.set_player_currencies_like_cpp(currencies);
+        Ok(Some(delta))
+    }
+
     /// C++ `Player::RemoveCurrency` underflow guard for vendor costs.
     pub(crate) fn remove_currency(&mut self, currency_id: u32, amount: u32) -> bool {
         if amount == 0 {
@@ -5626,6 +6053,251 @@ impl WorldSession {
         self.loot_drop_rates = rates;
     }
 
+    pub fn set_reputation_rates_like_cpp(&mut self, rates: ReputationRatesLikeCpp) {
+        self.reputation_rates = rates;
+    }
+
+    pub(crate) fn reputation_rates_like_cpp(&self) -> ReputationRatesLikeCpp {
+        self.reputation_rates
+    }
+
+    pub(crate) fn reputation_mgr_like_cpp(&self) -> &ReputationMgrLikeCpp {
+        &self.reputation_mgr_like_cpp
+    }
+
+    pub(crate) fn reputation_mgr_like_cpp_mut(&mut self) -> &mut ReputationMgrLikeCpp {
+        &mut self.reputation_mgr_like_cpp
+    }
+
+    pub(crate) fn load_character_reputation_rows_like_cpp(
+        &mut self,
+        rows: impl IntoIterator<Item = crate::reputation::mgr::CharacterReputationRowLikeCpp>,
+    ) -> bool {
+        let Some(faction_store) = self.faction_store().cloned() else {
+            return false;
+        };
+        let friendship_rep_reaction_store = self.friendship_rep_reaction_store().cloned();
+        let paragon_reputation_store = self.paragon_reputation_store.as_ref().cloned();
+        let race = self.player_race_like_cpp();
+        let class = self.player_class_like_cpp();
+
+        self.reputation_mgr_like_cpp_mut().load_from_db_like_cpp(
+            rows,
+            faction_store.as_ref(),
+            friendship_rep_reaction_store.as_deref(),
+            paragon_reputation_store.as_deref(),
+            race,
+            class,
+        );
+        true
+    }
+
+    pub(crate) fn watched_faction_index_like_cpp(&self) -> i32 {
+        self.watched_faction_index_like_cpp
+    }
+
+    pub(crate) fn set_watched_faction_index_like_cpp(&mut self, index: i32) {
+        self.watched_faction_index_like_cpp = index;
+    }
+
+    pub(crate) fn reputation_rank_like_cpp(
+        &self,
+        faction_entry: &FactionEntry,
+        standing: i32,
+    ) -> wow_data::reputation::ReputationRankLikeCpp {
+        reputation_to_rank_like_cpp(
+            faction_entry,
+            standing,
+            self.friendship_rep_reaction_store.as_deref(),
+        )
+    }
+
+    pub(crate) fn represented_faction_reaction_to_like_cpp(
+        &self,
+        input: RepresentedFactionReactionInputLikeCpp,
+    ) -> wow_data::reputation::ReputationRankLikeCpp {
+        use wow_data::reputation::ReputationRankLikeCpp;
+
+        let Some(faction_template_store) = self.faction_template_store.as_ref() else {
+            return ReputationRankLikeCpp::Neutral;
+        };
+        let Some(source_faction_template) =
+            faction_template_store.get(input.source_faction_template_id)
+        else {
+            return ReputationRankLikeCpp::Neutral;
+        };
+        let Some(target_faction_template) =
+            faction_template_store.get(input.target_faction_template_id)
+        else {
+            return ReputationRankLikeCpp::Neutral;
+        };
+
+        if input.target_has_player_owner && input.target_player_owner_is_current_session {
+            if source_faction_template.is_contested_guard_faction_like_cpp()
+                && input.target_player_contested_pvp
+            {
+                return ReputationRankLikeCpp::Hostile;
+            }
+            if let Some(forced_rank) = self
+                .reputation_mgr_like_cpp
+                .forced_rank_by_faction_id_like_cpp(u32::from(source_faction_template.faction))
+            {
+                return forced_rank;
+            }
+            if input.target_is_unit
+                && !input.target_ignores_reputation
+                && let Some(faction_store) = self.faction_store.as_ref()
+                && let Some(source_faction_entry) =
+                    faction_store.get(u32::from(source_faction_template.faction))
+                && source_faction_entry.can_have_reputation_like_cpp()
+            {
+                let mut rank = self
+                    .reputation_mgr_like_cpp
+                    .rank_for_faction_entry_like_cpp(
+                        source_faction_entry,
+                        self.friendship_rep_reaction_store.as_deref(),
+                        self.player_race_like_cpp(),
+                        self.player_class_like_cpp(),
+                    );
+                if self
+                    .reputation_mgr_like_cpp
+                    .is_at_war_with_faction_like_cpp(source_faction_entry)
+                    && rank > ReputationRankLikeCpp::Neutral
+                {
+                    rank = ReputationRankLikeCpp::Neutral;
+                }
+                return rank;
+            }
+        }
+
+        if source_faction_template.is_hostile_to_like_cpp(target_faction_template) {
+            return ReputationRankLikeCpp::Hostile;
+        }
+        if source_faction_template.is_friendly_to_like_cpp(target_faction_template) {
+            return ReputationRankLikeCpp::Friendly;
+        }
+        if target_faction_template.is_friendly_to_like_cpp(source_faction_template) {
+            return ReputationRankLikeCpp::Friendly;
+        }
+        if source_faction_template.is_hostile_by_default_like_cpp() {
+            return ReputationRankLikeCpp::Hostile;
+        }
+        ReputationRankLikeCpp::Neutral
+    }
+
+    pub(crate) fn represented_get_reaction_to_like_cpp(
+        &self,
+        input: RepresentedGetReactionInputLikeCpp,
+    ) -> wow_data::reputation::ReputationRankLikeCpp {
+        use wow_data::reputation::ReputationRankLikeCpp;
+
+        if input.same_object {
+            return ReputationRankLikeCpp::Friendly;
+        }
+        if input.attackable_by_summoner {
+            return ReputationRankLikeCpp::Neutral;
+        }
+        if input.same_charmer_or_owner_or_self {
+            return ReputationRankLikeCpp::Friendly;
+        }
+
+        if input.self_has_player_owner {
+            if let Some(faction_template_store) = self.faction_template_store.as_ref()
+                && let Some(target_faction_template) =
+                    faction_template_store.get(input.target_faction_template_id)
+                && let Some(forced_rank) = self
+                    .reputation_mgr_like_cpp
+                    .forced_rank_by_faction_id_like_cpp(u32::from(target_faction_template.faction))
+            {
+                return forced_rank;
+            }
+        } else if input.target_has_player_owner
+            && let Some(faction_template_store) = self.faction_template_store.as_ref()
+            && faction_template_store
+                .get(input.self_faction_template_id)
+                .is_some()
+            && let Some(forced_rank) = input.target_owner_forced_rank_for_self
+        {
+            return forced_rank;
+        }
+
+        if input.self_unit_player_controlled && input.target_unit_player_controlled {
+            if input.self_has_player_owner && input.target_has_player_owner {
+                if input.same_player_owner {
+                    return ReputationRankLikeCpp::Friendly;
+                }
+                if input.duel_in_progress {
+                    return ReputationRankLikeCpp::Hostile;
+                }
+                if input.same_raid {
+                    return ReputationRankLikeCpp::Friendly;
+                }
+            }
+
+            if input.self_ffa_pvp && input.target_ffa_pvp {
+                return ReputationRankLikeCpp::Hostile;
+            }
+
+            if input.self_has_player_owner {
+                let Some(faction_template_store) = self.faction_template_store.as_ref() else {
+                    return self.represented_faction_reaction_to_like_cpp(
+                        RepresentedFactionReactionInputLikeCpp {
+                            source_faction_template_id: input.self_faction_template_id,
+                            target_faction_template_id: input.target_faction_template_id,
+                            target_has_player_owner: input.target_has_player_owner,
+                            target_player_owner_is_current_session: input
+                                .target_player_owner_is_current_session,
+                            target_player_contested_pvp: input.target_player_contested_pvp,
+                            target_is_unit: input.target_is_unit,
+                            target_ignores_reputation: input.target_ignores_reputation,
+                        },
+                    );
+                };
+                if let Some(target_faction_template) =
+                    faction_template_store.get(input.target_faction_template_id)
+                {
+                    if let Some(forced_rank) = self
+                        .reputation_mgr_like_cpp
+                        .forced_rank_by_faction_id_like_cpp(u32::from(
+                            target_faction_template.faction,
+                        ))
+                    {
+                        return forced_rank;
+                    }
+                    if !input.self_ignores_reputation
+                        && let Some(faction_store) = self.faction_store.as_ref()
+                        && let Some(target_faction_entry) =
+                            faction_store.get(u32::from(target_faction_template.faction))
+                        && target_faction_entry.can_have_reputation_like_cpp()
+                    {
+                        if target_faction_template.is_contested_guard_faction_like_cpp()
+                            && input.target_player_contested_pvp
+                        {
+                            return ReputationRankLikeCpp::Hostile;
+                        }
+                        if self
+                            .reputation_mgr_like_cpp
+                            .is_at_war_with_faction_like_cpp(target_faction_entry)
+                        {
+                            return ReputationRankLikeCpp::Hostile;
+                        }
+                        return ReputationRankLikeCpp::Friendly;
+                    }
+                }
+            }
+        }
+
+        self.represented_faction_reaction_to_like_cpp(RepresentedFactionReactionInputLikeCpp {
+            source_faction_template_id: input.self_faction_template_id,
+            target_faction_template_id: input.target_faction_template_id,
+            target_has_player_owner: input.target_has_player_owner,
+            target_player_owner_is_current_session: input.target_player_owner_is_current_session,
+            target_player_contested_pvp: input.target_player_contested_pvp,
+            target_is_unit: input.target_is_unit,
+            target_ignores_reputation: input.target_ignores_reputation,
+        })
+    }
+
     pub fn set_enable_ae_loot_like_cpp(&mut self, enabled: bool) {
         self.enable_ae_loot_like_cpp = enabled;
     }
@@ -5667,6 +6339,26 @@ impl WorldSession {
         self.item_stats_store.as_ref()
     }
 
+    /// Resolve cached C++ `ItemTemplate::QuestLogItemId` from `item_template_addon`.
+    pub(crate) fn item_template_addon_quest_log_item_id_like_cpp(
+        &self,
+        item_id: u32,
+    ) -> Option<u32> {
+        self.item_template_addon_quest_log_item_ids_like_cpp
+            .get(&item_id)
+            .copied()
+    }
+
+    /// Cache C++ `ItemTemplate::QuestLogItemId` from `item_template_addon`.
+    pub(crate) fn cache_item_template_addon_quest_log_item_id_like_cpp(
+        &mut self,
+        item_id: u32,
+        quest_log_item_id: u32,
+    ) {
+        self.item_template_addon_quest_log_item_ids_like_cpp
+            .insert(item_id, quest_log_item_id);
+    }
+
     /// Resolve C++ `ItemTemplate::ExtendedData->Flags[0]`.
     pub fn item_template_flags(&self, item_id: u32) -> Option<ItemFlags> {
         self.item_stats_store
@@ -5680,6 +6372,14 @@ impl WorldSession {
             .as_ref()
             .and_then(|store| store.sparse_template(item_id))
             .map(|template| template.flags[1])
+    }
+
+    /// Resolve C++ `ItemTemplate::ExtendedData->Flags[2]`.
+    pub fn item_template_flags3(&self, item_id: u32) -> Option<u32> {
+        self.item_stats_store
+            .as_ref()
+            .and_then(|store| store.sparse_template(item_id))
+            .map(|template| template.flags[2])
     }
 
     /// C++ `Item::IsBoundAccountWide` template-flag predicate.
@@ -5999,6 +6699,26 @@ impl WorldSession {
             .collect()
     }
 
+    pub(crate) fn canonical_player_reputation_standing_like_cpp(
+        &self,
+        faction_id: u32,
+    ) -> Option<i32> {
+        let guid = self.player_guid()?;
+        let manager = self.canonical_map_manager.as_ref()?;
+        let manager = manager.lock().ok()?;
+        let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let player = map.map().get_typed_player(guid)?;
+
+        Some(
+            player
+                .gameplay_state()
+                .reputations
+                .iter()
+                .find_map(|record| (record.faction_id == faction_id).then_some(record.standing))
+                .unwrap_or(0),
+        )
+    }
+
     /// Resolve an inventory item by (bag, slot) following C++ Player::GetItemByPos.
     ///
     /// - `bag == INVENTORY_SLOT_BAG_0`       → top-level direct inventory (buyback excluded).
@@ -6074,9 +6794,17 @@ impl WorldSession {
             .create(player_guid);
         player.set_inventory_slot_count(INVENTORY_DEFAULT_SIZE);
 
+        let item_objects = self.inventory_item_objects_like_cpp();
         for (&slot, item) in self.inventory_items_like_cpp() {
             if (slot as usize) < PLAYER_SLOT_END && !Self::is_buyback_slot(slot) {
                 let _ = player.store_top_level_item(slot, item.guid);
+                if is_represented_bag_slot(slot)
+                    && item_objects.contains_key(&item.guid)
+                    && let Some(template) = self.item_storage_template(item.entry_id)
+                    && template.container_slots > 0
+                {
+                    let _ = player.register_bag_storage(slot, item.guid, template.container_slots);
+                }
             }
         }
 
@@ -6315,12 +7043,29 @@ impl WorldSession {
         let inventory_items = self.inventory_items_like_cpp();
         let item_objects = self.inventory_item_objects_like_cpp();
         let mut template_cache = HashMap::new();
+        for item in item_objects.values() {
+            let entry_id = item.object().entry();
+            if let std::collections::hash_map::Entry::Vacant(entry) = template_cache.entry(entry_id)
+            {
+                if let Some(template) = self.item_storage_template(entry_id) {
+                    entry.insert(template);
+                }
+            }
+        }
+
+        let mut represented_bag_slots_by_guid = HashMap::new();
+        let mut bag_templates = Vec::new();
         for (&slot, item) in inventory_items {
             if Self::is_buyback_slot(slot) {
                 continue;
             }
-            if let Some(template) = self.item_storage_template(item.entry_id) {
-                template_cache.insert(item.entry_id, template);
+            if is_represented_bag_slot(slot) && item_objects.contains_key(&item.guid) {
+                represented_bag_slots_by_guid.insert(item.guid, slot);
+                if let Some(template) = template_cache.get(&item.entry_id)
+                    && template.container_slots > 0
+                {
+                    bag_templates.push(BagTemplateRef::new(slot, template));
+                }
             }
         }
 
@@ -6341,7 +7086,27 @@ impl WorldSession {
                 template_cache.get(&inventory_item.entry_id),
             ));
         }
+        for item in item_objects.values() {
+            let container_guid = item.container_guid();
+            if container_guid.is_empty() {
+                continue;
+            }
+            let Some(&bag_slot) = represented_bag_slots_by_guid.get(&container_guid) else {
+                continue;
+            };
+            let entry_id = item.object().entry();
+            slot_items.push(ItemSlotRef::new(bag_slot, item.slot(), item));
+            stored_items.push(ItemStorageRef::new(
+                bag_slot,
+                item.slot(),
+                item,
+                template_cache.get(&entry_id),
+            ));
+        }
 
+        let limit_category = proto.as_ref().and_then(|proto| {
+            self.item_limit_category_template_like_cpp(proto.item_limit_category)
+        });
         let mut dest = Vec::new();
         let outcome = player.can_store_item(
             &mut dest,
@@ -6355,10 +7120,10 @@ impl WorldSession {
                 source_is_not_empty_bag: false,
                 source_bop_trade_allowed_for_player: false,
                 swap: false,
-                limit_category: None,
+                limit_category: limit_category.as_ref(),
                 slot_items: &slot_items,
                 stored_items: &stored_items,
-                bag_templates: &[],
+                bag_templates: &bag_templates,
             },
         );
 
@@ -6629,8 +7394,88 @@ impl WorldSession {
         self.map_difficulty_x_condition_store = Some(store);
     }
 
+    pub fn set_lfg_dungeons_store(&mut self, store: Arc<LfgDungeonsStore>) {
+        self.lfg_dungeons_store = Some(store);
+    }
+
     pub fn set_faction_store(&mut self, store: Arc<FactionStore>) {
         self.faction_store = Some(store);
+        self.initialize_reputation_mgr_like_cpp();
+    }
+
+    pub(crate) fn faction_store(&self) -> Option<&Arc<FactionStore>> {
+        self.faction_store.as_ref()
+    }
+
+    pub fn set_friendship_rep_reaction_store(&mut self, store: Arc<FriendshipRepReactionStore>) {
+        self.friendship_rep_reaction_store = Some(store);
+    }
+
+    pub(crate) fn friendship_rep_reaction_store(&self) -> Option<&Arc<FriendshipRepReactionStore>> {
+        self.friendship_rep_reaction_store.as_ref()
+    }
+
+    pub fn set_paragon_reputation_store(&mut self, store: Arc<ParagonReputationStore>) {
+        self.paragon_reputation_store = Some(store);
+        self.initialize_reputation_mgr_like_cpp();
+    }
+
+    pub(crate) fn paragon_reputation_store(&self) -> Option<&Arc<ParagonReputationStore>> {
+        self.paragon_reputation_store.as_ref()
+    }
+
+    fn initialize_reputation_mgr_like_cpp(&mut self) {
+        if let Some(faction_store) = self.faction_store.as_deref() {
+            self.reputation_mgr_like_cpp.initialize_like_cpp(
+                faction_store,
+                self.paragon_reputation_store.as_deref(),
+                self.player_race_like_cpp(),
+                self.player_class_like_cpp(),
+            );
+        }
+    }
+
+    pub fn set_reputation_reward_rate_store(
+        &mut self,
+        store: Arc<ReputationRewardRateStoreLikeCpp>,
+    ) {
+        self.reputation_reward_rate_store = Some(store);
+    }
+
+    pub(crate) fn reputation_reward_rate_store(
+        &self,
+    ) -> Option<&Arc<ReputationRewardRateStoreLikeCpp>> {
+        self.reputation_reward_rate_store.as_ref()
+    }
+
+    pub fn set_creature_onkill_reputation_store(
+        &mut self,
+        store: Arc<CreatureOnKillReputationStoreLikeCpp>,
+    ) {
+        self.creature_onkill_reputation_store = Some(store);
+    }
+
+    pub(crate) fn creature_onkill_reputation_store(
+        &self,
+    ) -> Option<&Arc<CreatureOnKillReputationStoreLikeCpp>> {
+        self.creature_onkill_reputation_store.as_ref()
+    }
+
+    pub(crate) fn set_championing_faction_like_cpp(&mut self, faction_id: u32) {
+        self.championing_faction_like_cpp = faction_id;
+    }
+
+    pub fn set_reputation_spillover_template_store(
+        &mut self,
+        store: Arc<RepSpilloverTemplateStoreLikeCpp>,
+    ) {
+        self.reputation_spillover_template_store = Some(store);
+    }
+
+    pub(crate) fn reputation_spillover_template_store(
+        &self,
+    ) -> Option<&Arc<RepSpilloverTemplateStoreLikeCpp>> {
+        self.reputation_spillover_template_store.as_ref()
     }
 
     pub fn set_faction_template_store(&mut self, store: Arc<FactionTemplateStore>) {
@@ -6894,6 +7739,16 @@ impl WorldSession {
         self.quest_v2_store = Some(store);
     }
 
+    /// Set the QuestPackageItem store used by C++ quest package reward selection.
+    pub fn set_quest_package_item_store(&mut self, store: Arc<QuestPackageItemStore>) {
+        self.quest_package_item_store = Some(store);
+    }
+
+    /// Set the QuestFactionReward store used by C++ quest reputation reward lookup.
+    pub fn set_quest_faction_reward_store(&mut self, store: Arc<QuestFactionRewardStore>) {
+        self.quest_faction_reward_store = Some(store);
+    }
+
     /// Save current player gold to the characters DB.
     pub(crate) async fn save_player_gold(&self) {
         use wow_database::CharStatements;
@@ -6935,6 +7790,31 @@ impl WorldSession {
         self.save_player_level_xp_like_cpp().await;
         self.save_player_gold().await;
         self.save_played_time().await;
+        self.save_reputation_to_db_like_cpp().await;
+    }
+
+    async fn save_reputation_to_db_like_cpp(&mut self) {
+        let (Some(guid), Some(char_db)) = (self.player_guid(), self.char_db().map(Arc::clone))
+        else {
+            return;
+        };
+        let statements = self
+            .reputation_mgr_like_cpp_mut()
+            .save_to_db_statement_plan_like_cpp(guid.counter() as u64);
+        if statements.is_empty() {
+            return;
+        }
+
+        let mut tx = SqlTransaction::new();
+        for statement in statements {
+            tx.append(statement);
+        }
+        if let Err(err) = char_db.commit_transaction(tx).await {
+            warn!(
+                "Failed to save character reputation for guid {}: {err}",
+                guid.counter()
+            );
+        }
     }
 
     /// Give XP to the player, leveling up if threshold reached.
@@ -7045,19 +7925,33 @@ impl WorldSession {
         base_gain.max(0) as u32
     }
 
-    /// Level at which mobs give 0 XP ("gray") — C# Formulas.GetGrayLevel
+    /// Level at which mobs give 0 XP ("gray") — C++ `Trinity::XP::GetGrayLevel`.
     fn gray_level(&self, pl: u8) -> u8 {
-        let p = pl as i32;
-        let g = if p <= 5 {
+        let mut level = if pl < 7 {
             0
-        } else if p <= 39 {
-            p - 5 - p / 10
-        } else if p <= 59 {
-            p - 1 - p / 5
+        } else if pl < 35 {
+            let count = (15..=pl).filter(|level| level % 5 == 0).count() as u8;
+            (pl - 7).saturating_sub(count.saturating_sub(1))
         } else {
-            p - 9
+            pl.saturating_sub(10)
         };
-        g.max(0) as u8
+        if let Some(script_level) = self
+            .represented_gray_level_script_overrides_like_cpp
+            .get(&pl)
+            .copied()
+        {
+            level = script_level;
+        }
+        level
+    }
+
+    pub(crate) fn set_represented_gray_level_script_override_like_cpp(
+        &mut self,
+        player_level: u8,
+        gray_level: u8,
+    ) {
+        self.represented_gray_level_script_overrides_like_cpp
+            .insert(player_level, gray_level);
     }
 
     /// Zero-difference table — C# Formulas.GetZeroDifference
@@ -7078,86 +7972,583 @@ impl WorldSession {
         }
     }
 
-    /// Called when the player kills a creature. Checks all active kill-objective quests
-    /// and updates progress. Sends SMSG_QUEST_UPDATE_ADD_CREDIT if progress was made.
-    pub(crate) async fn on_creature_killed(
+    fn calculate_kill_reputation_gain_like_cpp(
+        &self,
+        creature_level: u8,
+        rep: i32,
+        faction_id: u32,
+    ) -> i32 {
+        self.calculate_reputation_gain_like_cpp(
+            ReputationGainSourceLikeCpp::Kill,
+            u32::from(creature_level),
+            rep,
+            faction_id,
+            false,
+        )
+    }
+
+    pub(crate) fn reputation_gain_percent_before_reward_rate_like_cpp(
+        &self,
+        source: ReputationGainSourceLikeCpp,
+        creature_or_quest_level: u32,
+        rep: i32,
+        faction_id: u32,
+        no_quest_bonus: bool,
+    ) -> Option<f32> {
+        let mut percent = 100.0f32;
+        let mut rep_mod = if no_quest_bonus {
+            0.0
+        } else {
+            self.total_represented_aura_modifier_like_cpp(
+                RepresentedAuraEffectLikeCpp::ModReputationGain,
+            ) as f32
+        };
+
+        if source == ReputationGainSourceLikeCpp::Kill {
+            rep_mod += self.total_represented_aura_modifier_by_misc_value_like_cpp(
+                RepresentedAuraEffectLikeCpp::ModFactionReputationGain,
+                faction_id as i32,
+            ) as f32;
+        }
+
+        percent += if rep > 0 { rep_mod } else { -rep_mod };
+
+        let reputation_rates = self.reputation_rates_like_cpp();
+        let low_level_rate = match source {
+            ReputationGainSourceLikeCpp::Kill => reputation_rates.low_level_kill,
+            ReputationGainSourceLikeCpp::Quest
+            | ReputationGainSourceLikeCpp::DailyQuest
+            | ReputationGainSourceLikeCpp::WeeklyQuest
+            | ReputationGainSourceLikeCpp::MonthlyQuest
+            | ReputationGainSourceLikeCpp::RepeatableQuest => reputation_rates.low_level_quest,
+            ReputationGainSourceLikeCpp::Spell => 1.0,
+        };
+        if low_level_rate != 1.0
+            && creature_or_quest_level < u32::from(self.gray_level(self.player_level_like_cpp()))
+        {
+            percent *= low_level_rate;
+        }
+
+        (percent > 0.0).then_some(percent)
+    }
+
+    pub(crate) fn reputation_reward_rate_for_source_like_cpp(
+        &self,
+        source: ReputationGainSourceLikeCpp,
+        faction_id: u32,
+    ) -> Option<f32> {
+        let rates = self
+            .reputation_reward_rate_store()
+            .and_then(|store| store.get(faction_id))?;
+        let rate = match source {
+            ReputationGainSourceLikeCpp::Kill => rates.creature_rate,
+            ReputationGainSourceLikeCpp::Quest => rates.quest_rate,
+            ReputationGainSourceLikeCpp::DailyQuest => rates.quest_daily_rate,
+            ReputationGainSourceLikeCpp::WeeklyQuest => rates.quest_weekly_rate,
+            ReputationGainSourceLikeCpp::MonthlyQuest => rates.quest_monthly_rate,
+            ReputationGainSourceLikeCpp::RepeatableQuest => rates.quest_repeatable_rate,
+            ReputationGainSourceLikeCpp::Spell => rates.spell_rate,
+        };
+        Some(rate)
+    }
+
+    pub(crate) fn calculate_reputation_gain_like_cpp(
+        &self,
+        source: ReputationGainSourceLikeCpp,
+        creature_or_quest_level: u32,
+        rep: i32,
+        faction_id: u32,
+        no_quest_bonus: bool,
+    ) -> i32 {
+        let Some(mut percent) = self.reputation_gain_percent_before_reward_rate_like_cpp(
+            source,
+            creature_or_quest_level,
+            rep,
+            faction_id,
+            no_quest_bonus,
+        ) else {
+            return 0;
+        };
+
+        if let Some(rep_rate) = self.reputation_reward_rate_for_source_like_cpp(source, faction_id)
+        {
+            if rep_rate <= 0.0 {
+                return 0;
+            }
+            percent *= rep_rate;
+        }
+
+        percent = self.apply_recruit_a_friend_reputation_bonus_like_cpp(source, percent);
+
+        (rep as f32 * percent / 100.0) as i32
+    }
+
+    pub(crate) fn apply_recruit_a_friend_reputation_bonus_like_cpp(
+        &self,
+        source: ReputationGainSourceLikeCpp,
+        mut percent: f32,
+    ) -> f32 {
+        if source != ReputationGainSourceLikeCpp::Spell
+            && self.gets_recruit_a_friend_reputation_bonus_like_cpp()
+        {
+            percent *= 1.0 + self.reputation_rates_like_cpp().recruit_a_friend_bonus;
+        }
+        percent
+    }
+
+    fn gets_recruit_a_friend_reputation_bonus_like_cpp(&self) -> bool {
+        let (Some(player_guid), Some(group_guid), Some(group_registry), Some(player_registry)) = (
+            self.player_guid(),
+            self.group_guid,
+            self.group_registry.as_ref(),
+            self.player_registry.as_ref(),
+        ) else {
+            return false;
+        };
+        let Some(group) = group_registry.get(&group_guid) else {
+            return false;
+        };
+        if !group.members.contains(&player_guid) {
+            return false;
+        }
+        let group_members = group.members.clone();
+        drop(group);
+
+        let Some(player_position) = self.player_position_like_cpp() else {
+            return false;
+        };
+        let player_map_id = self.player_map_id_like_cpp();
+        let max_distance = self.reputation_rates_like_cpp().recruit_a_friend_distance;
+
+        for member_guid in group_members {
+            if member_guid == player_guid {
+                continue;
+            }
+            let Some(member) = player_registry.get(&member_guid) else {
+                continue;
+            };
+            if member.map_id != player_map_id {
+                continue;
+            }
+            if member.position.distance(&player_position) > max_distance {
+                continue;
+            }
+
+            let member_recruited_self = member.recruiter_id == self.account_id;
+            let self_recruited_member = self.recruiter_id_like_cpp() == member.account_id;
+            if member_recruited_self || self_recruited_member {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn current_map_difficulty_id_like_cpp(&self) -> u8 {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        self.canonical_map_manager
+            .as_ref()
+            .and_then(|manager| manager.lock().ok())
+            .and_then(|manager| {
+                manager
+                    .find_map(map_id, 0)
+                    .map(|managed| managed.map().spawn_mode())
+            })
+            .unwrap_or(0)
+    }
+
+    fn represented_championing_faction_for_kill_like_cpp(&self) -> Option<u32> {
+        let championing_faction = self.championing_faction_like_cpp;
+        if championing_faction == 0 {
+            return None;
+        }
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        if !self
+            .map_store()
+            .and_then(|store| store.get(map_id))
+            .is_some_and(|entry| entry.is_non_raid_dungeon_like_cpp())
+        {
+            return None;
+        }
+        let difficulty_id = self.current_map_difficulty_id_like_cpp();
+        let is_wrath_max_level_lfg = self
+            .lfg_dungeons_store
+            .as_ref()
+            .and_then(|store| store.get_by_map_and_difficulty_like_cpp(map_id, difficulty_id))
+            .is_some_and(|dungeon| {
+                dungeon.target_level == WRATH_OF_THE_LICH_KING_MAX_LEVEL_LIKE_CPP
+            });
+        is_wrath_max_level_lfg.then_some(championing_faction)
+    }
+
+    fn xp_in_group_rate_like_cpp(count: u32, is_raid: bool) -> f32 {
+        if is_raid {
+            0.99
+        } else {
+            match count {
+                0..=2 => 1.0,
+                3 => 1.166,
+                4 => 1.3,
+                _ => 1.4,
+            }
+        }
+    }
+
+    fn represented_player_group_reward_state_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+    ) -> Option<(u8, u16, Position, bool)> {
+        if self.player_guid() == Some(player_guid) {
+            return Some((
+                self.player_level_like_cpp(),
+                self.player_map_id_like_cpp(),
+                self.player_position_like_cpp().unwrap_or(Position::ZERO),
+                self.player_alive_like_cpp,
+            ));
+        }
+        self.player_registry.as_ref().and_then(|registry| {
+            registry
+                .get(&player_guid)
+                .map(|entry| (entry.level, entry.map_id, entry.position, entry.is_alive))
+        })
+    }
+
+    fn represented_creature_kill_reputation_rate_like_cpp(
+        &mut self,
+        player_guid: ObjectGuid,
+        creature_guid: ObjectGuid,
+    ) -> f32 {
+        let (Some(group_guid), Some(group_registry)) =
+            (self.group_guid, self.group_registry.as_ref())
+        else {
+            return 1.0;
+        };
+        let Some(group) = group_registry.get(&group_guid) else {
+            return 1.0;
+        };
+        if !group.members.contains(&player_guid) {
+            return 1.0;
+        }
+        let group_members = group.members.clone();
+        drop(group);
+
+        let Some((player_level, player_map_id, player_position, _)) =
+            self.represented_player_group_reward_state_like_cpp(player_guid)
+        else {
+            return 1.0;
+        };
+
+        if self
+            .map_store()
+            .and_then(|store| store.get(u32::from(player_map_id)))
+            .is_some_and(|entry| entry.is_dungeon())
+        {
+            return 1.0;
+        }
+
+        let (reward_map_id, reward_position) = self
+            .mutate_world_creature(creature_guid, |creature| {
+                (creature.map_id() as u16, creature.position())
+            })
+            .unwrap_or((player_map_id, player_position));
+
+        let mut count = 0_u32;
+        let mut sum_level = 0_u32;
+        for member_guid in group_members {
+            if member_guid == player_guid {
+                count = count.saturating_add(1);
+                sum_level = sum_level.saturating_add(u32::from(player_level));
+                continue;
+            }
+            let Some((member_level, _member_map_id, _member_position, is_alive)) =
+                self.represented_player_group_reward_state_like_cpp(member_guid)
+            else {
+                continue;
+            };
+            if is_alive
+                && self.represented_player_at_group_reward_distance_like_cpp(
+                    member_guid,
+                    reward_map_id,
+                    reward_position,
+                )
+            {
+                count = count.saturating_add(1);
+                sum_level = sum_level.saturating_add(u32::from(member_level));
+            }
+        }
+
+        if count == 0 || sum_level == 0 {
+            return 1.0;
+        }
+
+        Self::xp_in_group_rate_like_cpp(count, false) * f32::from(player_level) / sum_level as f32
+    }
+
+    fn reward_creature_kill_reputation_branch_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+        faction_id: u32,
+        reputation_value: i32,
+        max_cap: u8,
+        creature_level: u8,
+        kill_reward_rate: f32,
+    ) {
+        if faction_id == 0 {
+            return;
+        }
+
+        let effective_faction_id = self
+            .represented_championing_faction_for_kill_like_cpp()
+            .unwrap_or(faction_id);
+
+        let faction_store = match self.faction_store().map(Arc::clone) {
+            Some(store) => store,
+            None => return,
+        };
+        let Some(faction_entry) = faction_store.get(effective_faction_id).cloned() else {
+            return;
+        };
+
+        let mut reputation = self.calculate_kill_reputation_gain_like_cpp(
+            creature_level,
+            reputation_value,
+            effective_faction_id,
+        );
+        reputation = (reputation as f32 * kill_reward_rate) as i32;
+        if reputation == 0 {
+            return;
+        }
+
+        let current_rank = self
+            .reputation_mgr_like_cpp()
+            .rank_for_faction_entry_like_cpp(
+                &faction_entry,
+                self.friendship_rep_reaction_store.as_deref(),
+                self.player_race_like_cpp(),
+                self.player_class_like_cpp(),
+            );
+        let spillover_only = current_rank.as_u8() > max_cap;
+
+        let reputation_spillover_template_store =
+            self.reputation_spillover_template_store().map(Arc::clone);
+        let friendship_rep_reaction_store = self.friendship_rep_reaction_store().map(Arc::clone);
+        let paragon_reputation_store = self.paragon_reputation_store().map(Arc::clone);
+        let currency_types_store = self.currency_types_store().map(Arc::clone);
+        let db_spillover_template = reputation_spillover_template_store
+            .as_deref()
+            .and_then(|store| store.get(effective_faction_id));
+        let options = crate::reputation::mgr::SetReputationOptionsLikeCpp {
+            incremental: true,
+            spillover_only,
+            no_spillover: false,
+            reputation_gain_rate: self.reputation_rates_like_cpp().gain,
+            paragon_reward_quest_status_none_like_cpp: true,
+            renown_current_level_like_cpp: 0,
+            renown_currency_increased_cap_quantity_like_cpp: 0,
+            player_race: self.player_race_like_cpp(),
+            player_class: self.player_class_like_cpp(),
+        };
+        let outcome = self.reputation_mgr_like_cpp_mut().set_reputation_like_cpp(
+            &faction_entry,
+            reputation,
+            options,
+            &faction_store,
+            db_spillover_template,
+            friendship_rep_reaction_store.as_deref(),
+            paragon_reputation_store.as_deref(),
+            currency_types_store.as_deref(),
+        );
+        if let Some(rep_list_id) = outcome.send_state_rep_list_id {
+            let packet = self
+                .reputation_mgr_like_cpp_mut()
+                .set_faction_standing_packet_like_cpp(Some(rep_list_id));
+            self.send_packet(&packet);
+        }
+        if outcome.applied {
+            self.represented_creature_kill_events_like_cpp.push(
+                RepresentedCreatureKillEventLikeCpp::CreatureKillReputationAwarded {
+                    creature_guid,
+                    faction_id: effective_faction_id,
+                    reputation,
+                    spillover_only,
+                },
+            );
+        }
+    }
+
+    fn reward_reputation_from_creature_kill_like_cpp(
         &mut self,
         creature_entry: u32,
-        creature_guid: wow_core::ObjectGuid,
+        creature_guid: ObjectGuid,
+        creature_level: u8,
+        kill_reward_rate: f32,
     ) {
-        use wow_packet::ServerPacket;
-        use wow_packet::packets::quest::{QuestUpdateAddCredit, QuestUpdateComplete};
+        if self
+            .mutate_world_creature(creature_guid, |creature| {
+                creature.creature.is_reputation_gain_disabled()
+            })
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        let Some(rep) = self
+            .creature_onkill_reputation_store()
+            .and_then(|store| store.get(creature_entry))
+            .copied()
+        else {
+            return;
+        };
+        let team = player_team_for_race_cpp(self.player_race_like_cpp());
+
+        if rep.rep_faction_1 != 0 && (!rep.team_dependent || team == Team::Alliance) {
+            self.reward_creature_kill_reputation_branch_like_cpp(
+                creature_guid,
+                rep.rep_faction_1,
+                rep.rep_value_1,
+                rep.reputation_max_cap_1,
+                creature_level,
+                kill_reward_rate,
+            );
+        }
+        if rep.rep_faction_2 != 0 && (!rep.team_dependent || team == Team::Horde) {
+            self.reward_creature_kill_reputation_branch_like_cpp(
+                creature_guid,
+                rep.rep_faction_2,
+                rep.rep_value_2,
+                rep.reputation_max_cap_2,
+                creature_level,
+                kill_reward_rate,
+            );
+        }
+    }
+
+    async fn update_represented_storing_value_quest_objective_progress_like_cpp(
+        &mut self,
+        objective_type: u8,
+        object_id: i32,
+        add_count: i32,
+        credit_guid: wow_core::ObjectGuid,
+    ) {
+        use wow_packet::packets::quest::{
+            QuestUpdateAddCredit, QuestUpdateAddPvpCredit, QuestUpdateComplete,
+        };
 
         let Some(store) = self.quest_store.clone() else {
             return;
         };
 
-        // Objective type 0 = Monster/NPC kill
-        const OBJ_TYPE_MONSTER: u8 = 0;
-
-        // Collect quest IDs that have a matching kill objective to avoid borrow issues
-        let matching: Vec<(u32, usize, i32)> = self
+        let victim_team =
+            if objective_type == QUEST_OBJECTIVE_PLAYERKILLS_LIKE_CPP && !credit_guid.is_empty() {
+                self.player_registry
+                    .as_ref()
+                    .and_then(|registry| registry.get(&credit_guid).map(|victim| victim.race))
+                    .map(player_team_for_race_cpp)
+            } else {
+                None
+            };
+        let player_team = player_team_for_race_cpp(self.player_race_like_cpp());
+        let matching: Vec<(u32, usize, i32, u32)> = self
             .player_quests
             .values()
-            .filter(|qs| qs.status == 1) // only incomplete quests
-            .filter_map(|qs| {
+            .filter(|qs| qs.status == crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP)
+            .flat_map(|qs| {
                 let quest = store.get(qs.quest_id)?;
-                for (i, obj) in quest.objectives.iter().enumerate() {
-                    if obj.obj_type == OBJ_TYPE_MONSTER && obj.object_id == creature_entry as i32 {
-                        let idx = obj.storage_index.max(0) as usize;
-                        return Some((qs.quest_id, idx, obj.amount));
+                Some(quest.objectives.iter().filter_map(move |obj| {
+                    if obj.obj_type != objective_type || obj.object_id != object_id {
+                        return None;
                     }
-                }
-                None
+                    if objective_type == QUEST_OBJECTIVE_PLAYERKILLS_LIKE_CPP
+                        && (obj.flags & QUEST_OBJECTIVE_FLAG_KILL_PLAYERS_SAME_FACTION_LIKE_CPP)
+                            != 0
+                        && victim_team.is_some_and(|team| team != player_team)
+                    {
+                        return None;
+                    }
+                    let Ok(idx) = usize::try_from(obj.storage_index) else {
+                        return None;
+                    };
+                    Some((qs.quest_id, idx, obj.amount, obj.id))
+                }))
             })
+            .flatten()
             .collect();
 
-        for (quest_id, obj_idx, required) in matching {
+        let mut quests_to_complete = Vec::new();
+        for (quest_id, obj_idx, required, objective_id) in matching {
             let Some(qs) = self.player_quests.get_mut(&quest_id) else {
                 continue;
             };
             if qs.objective_counts.len() <= obj_idx {
                 qs.objective_counts.resize(obj_idx + 1, 0);
             }
-            if qs.objective_counts[obj_idx] >= required {
-                continue; // Already done
+            if add_count >= 0 && qs.objective_counts[obj_idx] >= required {
+                continue;
             }
-            qs.objective_counts[obj_idx] += 1;
+            qs.objective_counts[obj_idx] = qs.objective_counts[obj_idx]
+                .saturating_add(add_count)
+                .clamp(0, required);
             let current = qs.objective_counts[obj_idx];
 
             debug!(
                 account = self.account_id,
-                quest_id, obj_idx, current, required, "Quest kill objective progress"
+                quest_id,
+                obj_idx,
+                current,
+                required,
+                objective_type,
+                object_id,
+                "Quest objective progress"
             );
 
-            // SMSG_QUEST_UPDATE_ADD_CREDIT
-            self.send_packet(&QuestUpdateAddCredit {
-                victim_guid: creature_guid,
-                quest_id,
-                object_id: creature_entry as i32,
-                count: current as u16,
-                required: required as u16,
-                objective_type: OBJ_TYPE_MONSTER,
-            });
-
-            // Check if quest is now complete (all objectives satisfied)
-            let all_done = {
-                let quest = store.get(quest_id);
-                quest.map_or(false, |q| {
-                    let qs = self.player_quests.get(&quest_id).unwrap();
-                    q.objectives.iter().enumerate().all(|(i, obj)| {
-                        let idx = obj.storage_index.max(0) as usize;
-                        let progress = qs.objective_counts.get(idx).copied().unwrap_or(0);
-                        progress >= obj.amount
-                    })
-                })
-            };
-
-            if all_done {
-                if let Some(qs) = self.player_quests.get_mut(&quest_id) {
-                    qs.status = 2; // Complete
+            if add_count > 0 {
+                if objective_type == QUEST_OBJECTIVE_PLAYERKILLS_LIKE_CPP {
+                    self.send_packet(&QuestUpdateAddPvpCredit {
+                        quest_id,
+                        count: current as u16,
+                    });
+                } else {
+                    self.send_packet(&QuestUpdateAddCredit {
+                        victim_guid: credit_guid,
+                        quest_id,
+                        object_id,
+                        count: current as u16,
+                        required: required as u16,
+                        objective_type,
+                    });
                 }
-                self.send_packet(&QuestUpdateComplete { quest_id });
+            }
+
+            if current >= required {
+                if let Some(quest) = store.get(quest_id) {
+                    let quest_already_rewarded = self.rewarded_quests.contains(&quest_id);
+                    if self.player_quests.get(&quest_id).is_some_and(|status| {
+                        Self::represented_can_complete_quest_after_objective_like_cpp(
+                            status,
+                            quest,
+                            objective_id,
+                            quest_already_rewarded,
+                        )
+                    }) {
+                        quests_to_complete.push(quest_id);
+                    }
+                }
+            }
+        }
+
+        for quest_id in quests_to_complete {
+            let Some(quest) = store.get(quest_id).cloned() else {
+                continue;
+            };
+            let completed = self
+                .complete_represented_quest_after_add_if_ready_like_cpp(&quest)
+                .await;
+            if completed {
+                if self.player_quests.get(&quest_id).is_some_and(|qs| {
+                    qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+                }) {
+                    self.send_packet(&QuestUpdateComplete { quest_id });
+                }
                 info!(
                     account = self.account_id,
                     quest_id, "Quest objectives complete"
@@ -7165,6 +8556,625 @@ impl WorldSession {
             }
         }
         self.sync_player_registry_state_like_cpp();
+    }
+
+    async fn update_represented_storing_flag_quest_objective_progress_like_cpp(
+        &mut self,
+        objective_type: u8,
+        object_id: i32,
+        add_count: i32,
+    ) {
+        use wow_packet::packets::quest::{QuestUpdateAddCreditSimple, QuestUpdateComplete};
+
+        let Some(store) = self.quest_store.clone() else {
+            return;
+        };
+
+        let matching: Vec<(u32, usize, u32)> = self
+            .player_quests
+            .values()
+            .filter(|qs| qs.status == crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP)
+            .flat_map(|qs| {
+                let quest = store.get(qs.quest_id)?;
+                Some(quest.objectives.iter().filter_map(move |obj| {
+                    if obj.obj_type != objective_type
+                        || obj.object_id != object_id
+                        || !obj.is_storing_flag_like_cpp()
+                    {
+                        return None;
+                    }
+                    let Ok(idx) = usize::try_from(obj.storage_index) else {
+                        return None;
+                    };
+                    Some((qs.quest_id, idx, obj.id))
+                }))
+            })
+            .flatten()
+            .collect();
+
+        let mut quests_to_complete = Vec::new();
+        for (quest_id, obj_idx, objective_id) in matching {
+            let Some(qs) = self.player_quests.get_mut(&quest_id) else {
+                continue;
+            };
+            if qs.objective_counts.len() <= obj_idx {
+                qs.objective_counts.resize(obj_idx + 1, 0);
+            }
+            let objective_was_complete = qs.objective_counts[obj_idx] != 0;
+            qs.objective_counts[obj_idx] = i32::from(add_count > 0);
+            let objective_is_now_complete = qs.objective_counts[obj_idx] != 0;
+
+            if add_count > 0 {
+                self.send_packet(&QuestUpdateAddCreditSimple {
+                    quest_id,
+                    object_id,
+                    objective_type,
+                });
+            }
+
+            if !objective_was_complete && objective_is_now_complete {
+                if let Some(quest) = store.get(quest_id) {
+                    let quest_already_rewarded = self.rewarded_quests.contains(&quest_id);
+                    if self.player_quests.get(&quest_id).is_some_and(|status| {
+                        Self::represented_can_complete_quest_after_objective_like_cpp(
+                            status,
+                            quest,
+                            objective_id,
+                            quest_already_rewarded,
+                        )
+                    }) {
+                        quests_to_complete.push((quest_id, objective_id));
+                    }
+                }
+            }
+        }
+
+        for (quest_id, objective_id) in quests_to_complete {
+            let Some(quest) = store.get(quest_id).cloned() else {
+                continue;
+            };
+            let completed = self
+                .complete_represented_quest_after_objective_if_ready_like_cpp(&quest, objective_id)
+                .await;
+            if completed {
+                if self.player_quests.get(&quest_id).is_some_and(|qs| {
+                    qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+                }) {
+                    self.send_packet(&QuestUpdateComplete { quest_id });
+                }
+                info!(
+                    account = self.account_id,
+                    quest_id, "Quest objectives complete"
+                );
+            }
+        }
+        self.sync_player_registry_state_like_cpp();
+    }
+
+    async fn update_represented_money_quest_objective_progress_like_cpp(
+        &mut self,
+        old_money: u64,
+        new_money: u64,
+    ) {
+        use wow_packet::packets::quest::QuestUpdateComplete;
+
+        let Some(store) = self.quest_store.clone() else {
+            return;
+        };
+
+        let old_money = old_money.min(i64::MAX as u64) as i64;
+        let new_money_i64 = new_money.min(i64::MAX as u64) as i64;
+        let add_count = new_money_i64.saturating_sub(old_money);
+        let matching: Vec<(u32, u32, i32, bool, bool)> = self
+            .player_quests
+            .values()
+            .filter(|qs| {
+                qs.status == crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP
+                    || qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+            })
+            .flat_map(|qs| {
+                let quest = store.get(qs.quest_id)?;
+                Some(quest.objectives.iter().filter_map(move |obj| {
+                    if obj.obj_type != QUEST_OBJECTIVE_MONEY_LIKE_CPP || obj.object_id != 0 {
+                        return None;
+                    }
+                    let objective_was_complete = old_money >= i64::from(obj.amount);
+                    if objective_was_complete && add_count >= 0 {
+                        return None;
+                    }
+                    let objective_is_now_complete =
+                        old_money.saturating_add(add_count) >= i64::from(obj.amount);
+                    Some((
+                        qs.quest_id,
+                        obj.id,
+                        obj.amount,
+                        objective_was_complete,
+                        objective_is_now_complete,
+                    ))
+                }))
+            })
+            .flatten()
+            .collect();
+
+        let mut quests_to_complete = Vec::new();
+        for (quest_id, objective_id, required, objective_was_complete, objective_is_now_complete) in
+            matching
+        {
+            debug!(
+                account = self.account_id,
+                quest_id,
+                old_money,
+                new_money = new_money_i64,
+                required,
+                objective_was_complete,
+                objective_is_now_complete,
+                "Quest money objective progress"
+            );
+
+            if objective_is_now_complete {
+                if let Some(quest) = store.get(quest_id) {
+                    let quest_already_rewarded = self.rewarded_quests.contains(&quest_id);
+                    if self.player_quests.get(&quest_id).is_some_and(|status| {
+                        Self::represented_can_complete_quest_after_objective_like_cpp(
+                            status,
+                            quest,
+                            objective_id,
+                            quest_already_rewarded,
+                        )
+                    }) {
+                        quests_to_complete.push((quest_id, objective_id));
+                    }
+                }
+            } else if objective_was_complete {
+                if let Some(status) = self.player_quests.get_mut(&quest_id) {
+                    if status.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP {
+                        status.status = crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP;
+                    }
+                }
+            }
+        }
+
+        for (quest_id, objective_id) in quests_to_complete {
+            let Some(quest) = store.get(quest_id).cloned() else {
+                continue;
+            };
+            let completed = self
+                .complete_represented_quest_after_objective_if_ready_like_cpp(&quest, objective_id)
+                .await;
+            if completed {
+                if self.player_quests.get(&quest_id).is_some_and(|qs| {
+                    qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+                }) {
+                    self.send_packet(&QuestUpdateComplete { quest_id });
+                }
+                info!(
+                    account = self.account_id,
+                    quest_id, "Quest objectives complete"
+                );
+            }
+        }
+        self.sync_player_registry_state_like_cpp();
+    }
+
+    async fn update_represented_currency_quest_objective_progress_like_cpp(
+        &mut self,
+        currency_id: u32,
+        change: i32,
+    ) {
+        use wow_packet::packets::quest::QuestUpdateComplete;
+
+        let Some(store) = self.quest_store.clone() else {
+            return;
+        };
+
+        let current_quantity = i64::from(self.player_currency_quantity(currency_id));
+        let add_count = i64::from(change);
+        let object_id = i32::try_from(currency_id).unwrap_or(i32::MAX);
+        let matching: Vec<(u32, u32, i32, bool, bool)> = self
+            .player_quests
+            .values()
+            .filter(|qs| {
+                qs.status == crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP
+                    || qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+            })
+            .flat_map(|qs| {
+                let quest = store.get(qs.quest_id)?;
+                Some(quest.objectives.iter().filter_map(move |obj| {
+                    if obj.obj_type != QUEST_OBJECTIVE_CURRENCY_LIKE_CPP
+                        || obj.object_id != object_id
+                    {
+                        return None;
+                    }
+                    let objective_was_complete = current_quantity >= i64::from(obj.amount);
+                    if objective_was_complete && change >= 0 {
+                        return None;
+                    }
+                    let objective_is_now_complete =
+                        current_quantity.saturating_add(add_count) >= i64::from(obj.amount);
+                    Some((
+                        qs.quest_id,
+                        obj.id,
+                        obj.amount,
+                        objective_was_complete,
+                        objective_is_now_complete,
+                    ))
+                }))
+            })
+            .flatten()
+            .collect();
+
+        let mut quests_to_complete = Vec::new();
+        for (quest_id, objective_id, required, objective_was_complete, objective_is_now_complete) in
+            matching
+        {
+            debug!(
+                account = self.account_id,
+                quest_id,
+                currency_id,
+                current_quantity,
+                change,
+                required,
+                objective_was_complete,
+                objective_is_now_complete,
+                "Quest currency objective progress"
+            );
+
+            if objective_is_now_complete {
+                if let Some(quest) = store.get(quest_id) {
+                    let quest_already_rewarded = self.rewarded_quests.contains(&quest_id);
+                    if self.player_quests.get(&quest_id).is_some_and(|status| {
+                        Self::represented_can_complete_quest_after_objective_like_cpp(
+                            status,
+                            quest,
+                            objective_id,
+                            quest_already_rewarded,
+                        )
+                    }) {
+                        quests_to_complete.push((quest_id, objective_id));
+                    }
+                }
+            } else if objective_was_complete {
+                if let Some(status) = self.player_quests.get_mut(&quest_id) {
+                    if status.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP {
+                        status.status = crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP;
+                    }
+                }
+            }
+        }
+
+        for (quest_id, objective_id) in quests_to_complete {
+            let Some(quest) = store.get(quest_id).cloned() else {
+                continue;
+            };
+            let completed = self
+                .complete_represented_quest_after_objective_if_ready_like_cpp(&quest, objective_id)
+                .await;
+            if completed {
+                if self.player_quests.get(&quest_id).is_some_and(|qs| {
+                    qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+                }) {
+                    self.send_packet(&QuestUpdateComplete { quest_id });
+                }
+                info!(
+                    account = self.account_id,
+                    quest_id, "Quest objectives complete"
+                );
+            }
+        }
+        self.sync_player_registry_state_like_cpp();
+    }
+
+    async fn update_represented_reputation_quest_objective_progress_like_cpp(
+        &mut self,
+        objective_type: u8,
+        faction_id: u32,
+        change: i32,
+    ) {
+        use wow_packet::packets::quest::QuestUpdateComplete;
+
+        let Some(store) = self.quest_store.clone() else {
+            return;
+        };
+        let Some(faction_store) = self.faction_store.as_ref() else {
+            return;
+        };
+        let Some(faction_entry) = faction_store.get(faction_id) else {
+            return;
+        };
+
+        let old_reputation = self
+            .reputation_mgr_like_cpp()
+            .reputation_for_faction_like_cpp(
+                faction_entry,
+                self.player_race_like_cpp(),
+                self.player_class_like_cpp(),
+            );
+        let new_reputation = old_reputation.saturating_add(change);
+        let object_id = i32::try_from(faction_id).unwrap_or(i32::MAX);
+        let matching: Vec<(u32, u32, i32, bool, bool)> = self
+            .player_quests
+            .values()
+            .filter(|qs| {
+                qs.status == crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP
+                    || qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+            })
+            .flat_map(|qs| {
+                let quest = store.get(qs.quest_id)?;
+                Some(quest.objectives.iter().filter_map(move |obj| {
+                    if obj.obj_type != objective_type || obj.object_id != object_id {
+                        return None;
+                    }
+                    let (objective_was_complete, objective_is_now_complete) = match objective_type {
+                        QUEST_OBJECTIVE_MIN_REPUTATION_LIKE_CPP => {
+                            (old_reputation >= obj.amount, new_reputation >= obj.amount)
+                        }
+                        QUEST_OBJECTIVE_MAX_REPUTATION_LIKE_CPP => {
+                            (old_reputation <= obj.amount, new_reputation <= obj.amount)
+                        }
+                        _ => return None,
+                    };
+                    if objective_was_complete && change >= 0 {
+                        return None;
+                    }
+                    Some((
+                        qs.quest_id,
+                        obj.id,
+                        obj.amount,
+                        objective_was_complete,
+                        objective_is_now_complete,
+                    ))
+                }))
+            })
+            .flatten()
+            .collect();
+
+        let mut quests_to_complete = Vec::new();
+        for (quest_id, objective_id, required, objective_was_complete, objective_is_now_complete) in
+            matching
+        {
+            debug!(
+                account = self.account_id,
+                quest_id,
+                objective_type,
+                faction_id,
+                old_reputation,
+                new_reputation,
+                required,
+                objective_was_complete,
+                objective_is_now_complete,
+                "Quest reputation objective progress"
+            );
+
+            if objective_is_now_complete {
+                if let Some(quest) = store.get(quest_id) {
+                    let quest_already_rewarded = self.rewarded_quests.contains(&quest_id);
+                    if self.player_quests.get(&quest_id).is_some_and(|status| {
+                        Self::represented_can_complete_quest_after_objective_like_cpp(
+                            status,
+                            quest,
+                            objective_id,
+                            quest_already_rewarded,
+                        )
+                    }) {
+                        quests_to_complete.push((quest_id, objective_id));
+                    }
+                }
+            } else if objective_was_complete {
+                if let Some(status) = self.player_quests.get_mut(&quest_id) {
+                    if status.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP {
+                        status.status = crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP;
+                    }
+                }
+            }
+        }
+
+        for (quest_id, objective_id) in quests_to_complete {
+            let Some(quest) = store.get(quest_id).cloned() else {
+                continue;
+            };
+            let completed = self
+                .complete_represented_quest_after_objective_if_ready_like_cpp(&quest, objective_id)
+                .await;
+            if completed {
+                if self.player_quests.get(&quest_id).is_some_and(|qs| {
+                    qs.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP
+                }) {
+                    self.send_packet(&QuestUpdateComplete { quest_id });
+                }
+                info!(
+                    account = self.account_id,
+                    quest_id, "Quest objectives complete"
+                );
+            }
+        }
+        self.sync_player_registry_state_like_cpp();
+    }
+
+    /// Called when the player kills a creature. Checks all active kill-objective quests
+    /// and updates progress. Sends SMSG_QUEST_UPDATE_ADD_CREDIT if progress was made.
+    pub(crate) async fn on_creature_killed(
+        &mut self,
+        creature_entry: u32,
+        creature_guid: wow_core::ObjectGuid,
+    ) {
+        // C++ QUEST_OBJECTIVE_MONSTER.
+        self.update_represented_storing_value_quest_objective_progress_like_cpp(
+            0,
+            creature_entry as i32,
+            1,
+            creature_guid,
+        )
+        .await;
+    }
+
+    pub(crate) async fn kill_credit_gameobject_like_cpp(
+        &mut self,
+        gameobject_entry: u32,
+        gameobject_guid: wow_core::ObjectGuid,
+    ) {
+        // C++ QUEST_OBJECTIVE_GAMEOBJECT.
+        self.update_represented_storing_value_quest_objective_progress_like_cpp(
+            2,
+            gameobject_entry as i32,
+            1,
+            gameobject_guid,
+        )
+        .await;
+    }
+
+    pub(crate) async fn killed_player_credit_like_cpp(
+        &mut self,
+        victim_guid: wow_core::ObjectGuid,
+    ) {
+        // C++ QUEST_OBJECTIVE_PLAYERKILLS with ObjectID 0.
+        self.update_represented_storing_value_quest_objective_progress_like_cpp(
+            QUEST_OBJECTIVE_PLAYERKILLS_LIKE_CPP,
+            0,
+            1,
+            victim_guid,
+        )
+        .await;
+    }
+
+    pub(crate) async fn talked_to_creature_like_cpp(
+        &mut self,
+        creature_entry: u32,
+        creature_guid: wow_core::ObjectGuid,
+    ) {
+        // C++ QUEST_OBJECTIVE_TALKTO.
+        self.update_represented_storing_value_quest_objective_progress_like_cpp(
+            3,
+            creature_entry as i32,
+            1,
+            creature_guid,
+        )
+        .await;
+    }
+
+    pub(crate) async fn kill_credit_criteria_tree_objective_like_cpp(
+        &mut self,
+        criteria_tree_id: u32,
+    ) {
+        // C++ QUEST_OBJECTIVE_CRITERIA_TREE.
+        self.update_represented_storing_flag_quest_objective_progress_like_cpp(
+            14,
+            criteria_tree_id as i32,
+            1,
+        )
+        .await;
+    }
+
+    pub(crate) fn enqueue_represented_quest_objective_progress_like_cpp(
+        &mut self,
+        event: RepresentedQuestObjectiveProgressEventLikeCpp,
+    ) {
+        self.represented_quest_objective_progress_events_like_cpp
+            .push_back(event);
+    }
+
+    pub(crate) async fn drain_represented_quest_objective_progress_like_cpp(&mut self) {
+        if self.represented_quest_objective_progress_draining_like_cpp {
+            return;
+        }
+
+        self.represented_quest_objective_progress_draining_like_cpp = true;
+        while let Some(event) = self
+            .represented_quest_objective_progress_events_like_cpp
+            .pop_front()
+        {
+            match event {
+                RepresentedQuestObjectiveProgressEventLikeCpp::MoneyChanged {
+                    old_money,
+                    new_money,
+                } => {
+                    self.update_represented_money_quest_objective_progress_like_cpp(
+                        old_money, new_money,
+                    )
+                    .await;
+                }
+                RepresentedQuestObjectiveProgressEventLikeCpp::CurrencyChanged {
+                    currency_id,
+                    change,
+                } => {
+                    let object_id = i32::try_from(currency_id).unwrap_or(i32::MAX);
+                    self.update_represented_currency_quest_objective_progress_like_cpp(
+                        currency_id,
+                        change,
+                    )
+                    .await;
+                    self.update_represented_storing_value_quest_objective_progress_like_cpp(
+                        QUEST_OBJECTIVE_HAVE_CURRENCY_LIKE_CPP,
+                        object_id,
+                        change,
+                        wow_core::ObjectGuid::new(0, 0),
+                    )
+                    .await;
+                    self.update_represented_storing_value_quest_objective_progress_like_cpp(
+                        QUEST_OBJECTIVE_OBTAIN_CURRENCY_LIKE_CPP,
+                        object_id,
+                        change,
+                        wow_core::ObjectGuid::new(0, 0),
+                    )
+                    .await;
+                }
+                RepresentedQuestObjectiveProgressEventLikeCpp::ReputationChanged {
+                    faction_id,
+                    change,
+                } => {
+                    let object_id = i32::try_from(faction_id).unwrap_or(i32::MAX);
+                    self.update_represented_reputation_quest_objective_progress_like_cpp(
+                        QUEST_OBJECTIVE_MIN_REPUTATION_LIKE_CPP,
+                        faction_id,
+                        change,
+                    )
+                    .await;
+                    self.update_represented_reputation_quest_objective_progress_like_cpp(
+                        QUEST_OBJECTIVE_MAX_REPUTATION_LIKE_CPP,
+                        faction_id,
+                        change,
+                    )
+                    .await;
+                    self.update_represented_storing_value_quest_objective_progress_like_cpp(
+                        QUEST_OBJECTIVE_INCREASE_REPUTATION_LIKE_CPP,
+                        object_id,
+                        change,
+                        wow_core::ObjectGuid::new(0, 0),
+                    )
+                    .await;
+                }
+            }
+        }
+        self.represented_quest_objective_progress_draining_like_cpp = false;
+    }
+
+    pub(crate) async fn money_changed_like_cpp(&mut self, new_money: u64) {
+        self.enqueue_represented_quest_objective_progress_like_cpp(
+            RepresentedQuestObjectiveProgressEventLikeCpp::MoneyChanged {
+                old_money: self.player_gold_like_cpp(),
+                new_money,
+            },
+        );
+        self.drain_represented_quest_objective_progress_like_cpp()
+            .await;
+    }
+
+    pub(crate) async fn currency_changed_like_cpp(&mut self, currency_id: u32, change: i32) {
+        self.enqueue_represented_quest_objective_progress_like_cpp(
+            RepresentedQuestObjectiveProgressEventLikeCpp::CurrencyChanged {
+                currency_id,
+                change,
+            },
+        );
+        self.drain_represented_quest_objective_progress_like_cpp()
+            .await;
+    }
+
+    pub(crate) async fn reputation_changed_like_cpp(&mut self, faction_id: u32, change: i32) {
+        self.enqueue_represented_quest_objective_progress_like_cpp(
+            RepresentedQuestObjectiveProgressEventLikeCpp::ReputationChanged { faction_id, change },
+        );
+        self.drain_represented_quest_objective_progress_like_cpp()
+            .await;
     }
 
     /// Set the QuestXP store (loaded from QuestXP.db2).
@@ -7414,6 +9424,7 @@ impl WorldSession {
                 .unwrap_or_default(),
                 player_name: name.to_string(),
                 account_id: self.account_id,
+                recruiter_id: self.recruiter_id_like_cpp,
                 race,
                 class,
                 sex: gender,
@@ -8036,6 +10047,7 @@ impl WorldSession {
             aura_interrupt_flags2: 0,
             represented_effect: None,
             represented_amount: 0,
+            represented_misc_value: None,
             represented_multiplier: 1.0,
             applied_at: Instant::now(),
         };
@@ -8093,6 +10105,7 @@ impl WorldSession {
             aura_interrupt_flags2: 0,
             represented_effect: Some(RepresentedAuraEffectLikeCpp::Mounted),
             represented_amount: effect.effect_base_points,
+            represented_misc_value: Some(effect.effect_misc_value_1),
             represented_multiplier: 1.0,
             applied_at: Instant::now(),
         };
@@ -8691,6 +10704,16 @@ impl WorldSession {
             if xp > 0 {
                 self.give_xp(xp, reward.creature_guid, true).await;
             }
+            let reputation_rate = self.represented_creature_kill_reputation_rate_like_cpp(
+                reward.killer_guid,
+                reward.creature_guid,
+            );
+            self.reward_reputation_from_creature_kill_like_cpp(
+                reward.creature_entry,
+                reward.creature_guid,
+                reward.creature_level,
+                reputation_rate,
+            );
             self.on_creature_killed(reward.creature_entry, reward.creature_guid)
                 .await;
             self.record_represented_creature_kill_hooks_like_cpp(
@@ -9402,6 +11425,18 @@ impl WorldSession {
             ClientOpcodes::RequestForcedReactions => {
                 self.handle_request_forced_reactions(pkt).await;
             }
+            ClientOpcodes::SetFactionAtWar => {
+                self.handle_set_faction_at_war(pkt).await;
+            }
+            ClientOpcodes::SetFactionNotAtWar => {
+                self.handle_set_faction_not_at_war(pkt).await;
+            }
+            ClientOpcodes::SetFactionInactive => {
+                self.handle_set_faction_inactive(pkt).await;
+            }
+            ClientOpcodes::SetWatchedFaction => {
+                self.handle_set_watched_faction(pkt).await;
+            }
             ClientOpcodes::RequestBattlefieldStatus => {
                 self.handle_request_battlefield_status(pkt).await;
             }
@@ -9885,6 +11920,9 @@ impl WorldSession {
             display_text: match plan.display_text {
                 SendNewItemDisplayText::Normal => ItemPushResultDisplayType::Normal,
                 SendNewItemDisplayText::EncounterLoot => ItemPushResultDisplayType::EncounterLoot,
+                SendNewItemDisplayText::QuestUpdateAddItem => {
+                    ItemPushResultDisplayType::QuestUpdateAddItem
+                }
             },
             created: plan.created,
             is_bonus_roll: false,
@@ -10109,6 +12147,7 @@ impl WorldSession {
             controller.set_level(level);
             controller.gender = gender;
         }
+        self.initialize_reputation_mgr_like_cpp();
     }
 
     pub(crate) fn attach_player_controller_like_cpp(
@@ -10133,6 +12172,7 @@ impl WorldSession {
         self.player_moved_unit_guid_like_cpp = controller.guid();
         self.represented_seer_guid_like_cpp = Some(controller.guid());
         self.player_controller = Some(controller);
+        self.initialize_reputation_mgr_like_cpp();
     }
 
     pub(crate) fn set_player_map_position_like_cpp(
@@ -10509,13 +12549,18 @@ impl WorldSession {
             .player_quests
             .iter()
             .filter_map(|(&quest_id, status)| {
-                (status.status == 1 || status.status == 2).then_some(quest_id)
+                (status.status == crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP
+                    || status.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP)
+                    .then_some(quest_id)
             })
             .collect();
         let complete_quests = self
             .player_quests
             .iter()
-            .filter_map(|(&quest_id, status)| (status.status == 2).then_some(quest_id))
+            .filter_map(|(&quest_id, status)| {
+                (status.status == crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP)
+                    .then_some(quest_id)
+            })
             .collect();
         let auras = self
             .visible_auras
@@ -11039,6 +13084,21 @@ impl WorldSession {
             .sum()
     }
 
+    fn total_represented_aura_modifier_by_misc_value_like_cpp(
+        &self,
+        effect: RepresentedAuraEffectLikeCpp,
+        misc_value: i32,
+    ) -> i32 {
+        self.visible_auras
+            .values()
+            .filter(|aura| {
+                aura.represented_effect == Some(effect)
+                    && aura.represented_misc_value == Some(misc_value)
+            })
+            .map(|aura| aura.represented_amount)
+            .sum()
+    }
+
     fn total_represented_aura_multiplier_like_cpp(
         &self,
         effect: RepresentedAuraEffectLikeCpp,
@@ -11410,25 +13470,6 @@ impl WorldSession {
             || gameobject_usable_mounted
     }
 
-    fn faction_template_is_friendly_to_like_cpp(
-        faction: &wow_data::progression_rewards::FactionTemplateEntry,
-        other: &wow_data::progression_rewards::FactionTemplateEntry,
-    ) -> bool {
-        if faction.id == other.id {
-            return true;
-        }
-        if other.faction != 0 {
-            if faction.enemies.contains(&other.faction) {
-                return false;
-            }
-            if faction.friend.contains(&other.faction) {
-                return true;
-            }
-        }
-        (faction.friend_group & other.faction_group) != 0
-            || (faction.faction_group & other.friend_group) != 0
-    }
-
     fn has_recently_dropped_flag_debuff_like_cpp(&self) -> bool {
         const SPELL_RECENTLY_DROPPED_ALLIANCE_FLAG: i32 = 42_792;
         const SPELL_RECENTLY_DROPPED_HORDE_FLAG: i32 = 50_326;
@@ -11459,7 +13500,7 @@ impl WorldSession {
             self.faction_template_store.as_ref(),
         ) && let (Some(player_entry), Some(gameobject_entry)) =
             (store.get(player_faction), store.get(gameobject_faction))
-            && !Self::faction_template_is_friendly_to_like_cpp(player_entry, gameobject_entry)
+            && !player_entry.is_friendly_to_like_cpp(gameobject_entry)
         {
             self.represented_gameobject_use_effects.push(
                 RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
@@ -11557,10 +13598,7 @@ impl WorldSession {
         let store = self.faction_template_store.as_ref()?;
         let gameobject_entry = store.get(gameobject_faction)?;
         let player_entry = store.get(player_faction)?;
-        Some(Self::faction_template_is_friendly_to_like_cpp(
-            gameobject_entry,
-            player_entry,
-        ))
+        Some(gameobject_entry.is_friendly_to_like_cpp(player_entry))
     }
 
     pub(crate) fn record_represented_gameobject_report_use_ai_like_cpp(
@@ -13703,16 +15741,7 @@ impl WorldSession {
     }
 
     fn represented_gameobject_spell_lookup_difficulty_id_like_cpp(&self) -> u8 {
-        let map_id = u32::from(self.player_map_id_like_cpp());
-        self.canonical_map_manager
-            .as_ref()
-            .and_then(|manager| manager.lock().ok())
-            .and_then(|manager| {
-                manager
-                    .find_map(map_id, 0)
-                    .map(|managed| managed.map().spawn_mode())
-            })
-            .unwrap_or(0)
+        self.current_map_difficulty_id_like_cpp()
     }
 
     pub(crate) fn use_represented_creature_questgiver_like_cpp(
@@ -14458,7 +16487,7 @@ impl WorldSession {
         true
     }
 
-    pub(crate) fn use_represented_gameobject_goober_preamble_like_cpp(
+    pub(crate) async fn use_represented_gameobject_goober_preamble_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
         gameobject_entry: u32,
@@ -14540,6 +16569,10 @@ impl WorldSession {
                         entry: gameobject_entry,
                     },
                 );
+                if Some(credit_guid) == self.player_guid() {
+                    self.kill_credit_gameobject_like_cpp(gameobject_entry, gameobject_guid)
+                        .await;
+                }
             }
         }
 
@@ -15815,6 +17848,44 @@ impl WorldSession {
         self.sync_player_registry_state_like_cpp();
     }
 
+    pub(crate) fn represented_timed_quest_removals_like_cpp(&self) -> &[u32] {
+        &self.represented_timed_quest_removals_like_cpp
+    }
+
+    pub(crate) fn represented_quest_reward_skill_updates_like_cpp(&self) -> &[(u32, u32)] {
+        &self.represented_quest_reward_skill_updates_like_cpp
+    }
+
+    pub(crate) fn represented_quest_reward_spell_casts_like_cpp(
+        &self,
+    ) -> &[RepresentedQuestRewardSpellCastLikeCpp] {
+        &self.represented_quest_reward_spell_casts_like_cpp
+    }
+
+    pub(crate) fn represented_quest_reward_titles_like_cpp(
+        &self,
+    ) -> &[RepresentedQuestRewardTitleLikeCpp] {
+        &self.represented_quest_reward_titles_like_cpp
+    }
+
+    pub(crate) fn represented_quest_reward_talent_points_like_cpp(
+        &self,
+    ) -> &[RepresentedQuestRewardTalentPointsLikeCpp] {
+        &self.represented_quest_reward_talent_points_like_cpp
+    }
+
+    pub(crate) fn represented_quest_reward_mails_like_cpp(
+        &self,
+    ) -> &[RepresentedQuestRewardMailLikeCpp] {
+        &self.represented_quest_reward_mails_like_cpp
+    }
+
+    pub(crate) fn represented_quest_reward_reputations_like_cpp(
+        &self,
+    ) -> &[RepresentedQuestRewardReputationLikeCpp] {
+        &self.represented_quest_reward_reputations_like_cpp
+    }
+
     pub(crate) fn represented_quest_push_result_responses_like_cpp(
         &self,
     ) -> &[RepresentedQuestPushResultResponseLikeCpp] {
@@ -15850,6 +17921,20 @@ impl WorldSession {
         evidence: RepresentedQuestConfirmAcceptLikeCpp,
     ) {
         self.represented_quest_confirm_accepts_like_cpp
+            .push(evidence);
+    }
+
+    pub(crate) fn represented_quest_complete_status_updates_like_cpp(
+        &self,
+    ) -> &[RepresentedQuestCompleteStatusUpdateLikeCpp] {
+        &self.represented_quest_complete_status_updates_like_cpp
+    }
+
+    pub(crate) fn record_represented_quest_complete_status_update_like_cpp(
+        &mut self,
+        evidence: RepresentedQuestCompleteStatusUpdateLikeCpp,
+    ) {
+        self.represented_quest_complete_status_updates_like_cpp
             .push(evidence);
     }
 
@@ -17972,6 +20057,14 @@ impl WorldSession {
             if xp > 0 {
                 self.give_xp(xp, guid, true).await;
             }
+            let reputation_rate =
+                self.represented_creature_kill_reputation_rate_like_cpp(player_guid, guid);
+            self.reward_reputation_from_creature_kill_like_cpp(
+                entry,
+                guid,
+                mob_level,
+                reputation_rate,
+            );
             self.on_creature_killed(entry, guid).await;
             self.record_represented_creature_kill_hooks_like_cpp(player_guid, guid);
             if let Some(death_values_update) = self
@@ -18180,19 +20273,25 @@ mod tests {
         ImportPriceQualityStore, ImportPriceShieldEntry, ImportPriceShieldStore, ImportPriceStores,
         ImportPriceWeaponEntry, ImportPriceWeaponStore, ItemAppearanceEntry, ItemAppearanceStore,
         ItemClassEntry, ItemClassStore, ItemCurrencyCostEntry, ItemCurrencyCostStore,
-        ItemDisenchantLootEntry, ItemDisenchantLootStore, ItemModifiedAppearanceEntry,
-        ItemModifiedAppearanceStore, ItemPriceBaseEntry, ItemPriceBaseStore, ItemRandomSuffixEntry,
-        ItemRandomSuffixStore, ItemRecord, ItemSparseTemplateEntry, ItemStatsStore, ItemStore,
-        LockEntry, LockStore, SpellItemEnchantmentEntry, SpellItemEnchantmentStore,
+        ItemDisenchantLootEntry, ItemDisenchantLootStore, ItemLimitCategoryConditionEntry,
+        ItemLimitCategoryConditionStore, ItemLimitCategoryEntry, ItemLimitCategoryStore,
+        ItemModifiedAppearanceEntry, ItemModifiedAppearanceStore, ItemPriceBaseEntry,
+        ItemPriceBaseStore, ItemRandomSuffixEntry, ItemRandomSuffixStore, ItemRecord,
+        ItemSparseTemplateEntry, ItemStatsStore, ItemStore, LockEntry, LockStore,
+        PlayerConditionEntry, PlayerConditionStore, SpellItemEnchantmentEntry,
+        SpellItemEnchantmentStore,
+        progression_rewards::{FactionEntry, FactionStore},
+        reputation::ReputationFlagsLikeCpp,
     };
     use wow_entities::{
         AccessorObjectRef, BANK_SLOT_BAG_START, EQUIPMENT_SLOT_CHEST, INVENTORY_SLOT_BAG_START,
-        REAGENT_BAG_SLOT_START, SendNewItemInstancePlan, SendNewItemModifier,
+        INVENTORY_SLOT_ITEM_START, REAGENT_BAG_SLOT_START, SendNewItemInstancePlan,
+        SendNewItemModifier,
     };
     use wow_movement::MoveSplineFlag;
     use wow_network::{
         GameEventQuestCompleteClientOutcomeLikeCpp, GameEventQuestCompleteResponseLikeCpp,
-        GroupInfo, PlayerBroadcastInfo, ResetSeasonalQuestStatusCommand,
+        GroupInfo, PendingInvites, PlayerBroadcastInfo, ResetSeasonalQuestStatusCommand,
     };
     use wow_packet::ServerPacket;
     use wow_packet::packets::loot::{
@@ -18259,6 +20358,32 @@ mod tests {
             search_from += relative_pos + needle.len();
         }
         true
+    }
+
+    #[test]
+    fn load_character_reputation_rows_like_cpp_merges_rows_after_identity_and_store() {
+        let (mut session, _, _) = make_session();
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 10, 0);
+        let mut faction = FactionEntry::for_test_like_cpp(72, 4);
+        faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        session.set_faction_store(Arc::new(FactionStore::from_entries([faction])));
+
+        assert!(session.load_character_reputation_rows_like_cpp([
+            crate::reputation::mgr::CharacterReputationRowLikeCpp {
+                faction_id: 72,
+                standing: 3500,
+                flags: (ReputationFlagsLikeCpp::VISIBLE | ReputationFlagsLikeCpp::AT_WAR).bits(),
+            },
+        ]));
+
+        let state = session
+            .reputation_mgr_like_cpp()
+            .get_state(4)
+            .expect("reputation state");
+        assert_eq!(state.standing, 3500);
+        assert!(state.flags.contains(ReputationFlagsLikeCpp::VISIBLE));
+        assert!(state.flags.contains(ReputationFlagsLikeCpp::AT_WAR));
+        assert!(!state.need_save);
     }
 
     #[tokio::test]
@@ -18590,6 +20715,7 @@ mod tests {
             quest_type: 0,
             quest_level: 1,
             quest_max_scaling_level: 0,
+            quest_package_id: 0,
             min_level: 1,
             quest_sort_id: 0,
             quest_info_id: 0,
@@ -18603,9 +20729,21 @@ mod tests {
             reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            reward_title_id: 0,
+            reward_skill_line_id: 0,
+            reward_skill_points: 0,
+            reward_mail_template_id: 0,
+            reward_mail_delay_secs: 0,
+            reward_mail_sender_entry: 0,
+            reward_faction_ids: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_values: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_overrides: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_cap_in: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_flags: 0,
             source_item_id: 0,
             source_item_count: 0,
             source_spell_id: 0,
+            limit_time_secs: 0,
             expansion: 0,
             flags: 0,
             flags_ex: 0,
@@ -18614,6 +20752,8 @@ mod tests {
             event_id_for_quest: 0,
             reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
             reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+            reward_currencies: [0; wow_data::quest::QUEST_REWARD_CURRENCY_COUNT],
+            reward_currency_amounts: [0; wow_data::quest::QUEST_REWARD_CURRENCY_COUNT],
             item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
             item_drop_quantity: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
             log_title: String::new(),
@@ -18636,6 +20776,7 @@ mod tests {
             required_max_rep_faction: 0,
             required_max_rep_value: 0,
             reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
+            reward_choice_item_types: [0; wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
         }
     }
 
@@ -18658,6 +20799,883 @@ mod tests {
             ids.into_iter()
                 .map(|id| seasonal_test_quest_template(id, -376, 9)),
         )
+    }
+
+    #[tokio::test]
+    async fn creature_kill_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(9_900);
+        let quest_id = 12_501;
+        let creature_entry = 9_901;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: 0, // C++ QUEST_OBJECTIVE_MONSTER
+            order: 0,
+            storage_index: 0,
+            object_id: creature_entry as i32,
+            amount: 1,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session
+            .on_creature_killed(creature_entry, creature_guid)
+            .await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            session.represented_quest_complete_status_updates_like_cpp(),
+            &[RepresentedQuestCompleteStatusUpdateLikeCpp {
+                quest_id,
+                old_status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                new_status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
+                send_quest_update_called: true,
+                quest_slot_state_complete_represented: true,
+                quest_slot_state_live_update_unrepresented: true,
+                visible_gameobjects_or_spellclicks_refresh_unrepresented: true,
+                spell_area_runtime_unrepresented: true,
+                tracking_event_auto_reward_unrepresented: false,
+                quest_tracker_complete_time_unrepresented: true,
+                script_status_change_unrepresented: true,
+            }]
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddCredit,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn player_kill_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let victim_guid = ObjectGuid::create_player(1, 84);
+        let quest_id = 12_503;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_PLAYERKILLS_LIKE_CPP,
+            order: 0,
+            storage_index: 0,
+            object_id: 0,
+            amount: 1,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session.killed_player_credit_like_cpp(victim_guid).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            session.represented_quest_complete_status_updates_like_cpp(),
+            &[RepresentedQuestCompleteStatusUpdateLikeCpp {
+                quest_id,
+                old_status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                new_status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
+                send_quest_update_called: true,
+                quest_slot_state_complete_represented: true,
+                quest_slot_state_live_update_unrepresented: true,
+                visible_gameobjects_or_spellclicks_refresh_unrepresented: true,
+                spell_area_runtime_unrepresented: true,
+                tracking_event_auto_reward_unrepresented: false,
+                quest_tracker_complete_time_unrepresented: true,
+                script_status_change_unrepresented: true,
+            }]
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddPvpCredit,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn player_kill_same_faction_objective_skips_opposite_team_victim_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let victim_guid = ObjectGuid::create_player(1, 84);
+        let (victim_tx, _victim_rx) = flume::bounded(1);
+        let registry = Arc::new(PlayerRegistry::default());
+        let mut victim_info = broadcast_info(victim_guid, victim_tx);
+        victim_info.race = 2; // Orc/Horde; player test race defaults to Human/Alliance.
+        registry.insert(victim_guid, victim_info);
+
+        let quest_id = 12_504;
+        let mut quest = test_quest_template(quest_id);
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_PLAYERKILLS_LIKE_CPP,
+            order: 0,
+            storage_index: 0,
+            object_id: 0,
+            amount: 1,
+            flags: QUEST_OBJECTIVE_FLAG_KILL_PLAYERS_SAME_FACTION_LIKE_CPP,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.player_race = 1;
+        session.set_player_guid(Some(player_guid));
+        session.set_player_registry(registry);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session.killed_player_credit_like_cpp(victim_guid).await;
+
+        let status = session.player_quests.get(&quest_id).expect("quest remains");
+        assert_eq!(status.objective_counts, vec![0]);
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn talked_to_creature_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(9_902);
+        let quest_id = 12_505;
+        let creature_entry = 9_903;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: 3, // C++ QUEST_OBJECTIVE_TALKTO.
+            order: 0,
+            storage_index: 0,
+            object_id: creature_entry as i32,
+            amount: 1,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session
+            .talked_to_creature_like_cpp(creature_entry, creature_guid)
+            .await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            session.represented_quest_complete_status_updates_like_cpp(),
+            &[RepresentedQuestCompleteStatusUpdateLikeCpp {
+                quest_id,
+                old_status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                new_status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
+                send_quest_update_called: true,
+                quest_slot_state_complete_represented: true,
+                quest_slot_state_live_update_unrepresented: true,
+                visible_gameobjects_or_spellclicks_refresh_unrepresented: true,
+                spell_area_runtime_unrepresented: true,
+                tracking_event_auto_reward_unrepresented: false,
+                quest_tracker_complete_time_unrepresented: true,
+                script_status_change_unrepresented: true,
+            }]
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddCredit,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn criteria_tree_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_506;
+        let criteria_tree_id = 90_001;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: 14, // C++ QUEST_OBJECTIVE_CRITERIA_TREE.
+            order: 0,
+            storage_index: 0,
+            object_id: criteria_tree_id as i32,
+            amount: 1,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session
+            .kill_credit_criteria_tree_objective_like_cpp(criteria_tree_id)
+            .await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            session.represented_quest_complete_status_updates_like_cpp(),
+            &[RepresentedQuestCompleteStatusUpdateLikeCpp {
+                quest_id,
+                old_status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                new_status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
+                send_quest_update_called: true,
+                quest_slot_state_complete_represented: true,
+                quest_slot_state_live_update_unrepresented: true,
+                visible_gameobjects_or_spellclicks_refresh_unrepresented: true,
+                spell_area_runtime_unrepresented: true,
+                tracking_event_auto_reward_unrepresented: false,
+                quest_tracker_complete_time_unrepresented: true,
+                script_status_change_unrepresented: true,
+            }]
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddCreditSimple,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn money_changed_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_507;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_MONEY_LIKE_CPP,
+            order: 0,
+            storage_index: -1,
+            object_id: 0,
+            amount: 100,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(90);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+
+        session.money_changed_like_cpp(100).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            session.represented_quest_complete_status_updates_like_cpp(),
+            &[RepresentedQuestCompleteStatusUpdateLikeCpp {
+                quest_id,
+                old_status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                new_status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
+                send_quest_update_called: true,
+                quest_slot_state_complete_represented: true,
+                quest_slot_state_live_update_unrepresented: true,
+                visible_gameobjects_or_spellclicks_refresh_unrepresented: true,
+                spell_area_runtime_unrepresented: true,
+                tracking_event_auto_reward_unrepresented: false,
+                quest_tracker_complete_time_unrepresented: true,
+                script_status_change_unrepresented: true,
+            }]
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn money_changed_loss_marks_complete_money_objective_incomplete_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_510;
+        let mut quest = test_quest_template(quest_id);
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_MONEY_LIKE_CPP,
+            order: 0,
+            storage_index: -1,
+            object_id: 0,
+            amount: 100,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(100);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+
+        session.money_changed_like_cpp(50).await;
+
+        assert_eq!(
+            session
+                .player_quests
+                .get(&quest_id)
+                .map(|status| status.status),
+            Some(crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP)
+        );
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+    }
+
+    #[tokio::test]
+    async fn tracking_event_reward_money_drains_money_objective_queue_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let reward_quest_id = 12_508;
+        let money_objective_quest_id = 12_509;
+
+        let mut reward_quest = test_quest_template(reward_quest_id);
+        reward_quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        reward_quest.reward_money_difficulty = 100;
+
+        let mut money_objective_quest = test_quest_template(money_objective_quest_id);
+        money_objective_quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        money_objective_quest
+            .objectives
+            .push(wow_data::quest::QuestObjective {
+                id: money_objective_quest_id * 10,
+                quest_id: money_objective_quest_id,
+                obj_type: QUEST_OBJECTIVE_MONEY_LIKE_CPP,
+                order: 0,
+                storage_index: -1,
+                object_id: 0,
+                amount: 100,
+                flags: 0,
+                flags2: 0,
+                progress_bar_weight: 0.0,
+                description: String::new(),
+            });
+
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(0);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [reward_quest.clone(), money_objective_quest],
+        )));
+        session.player_quests.insert(
+            reward_quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: reward_quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+        session.player_quests.insert(
+            money_objective_quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: money_objective_quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 1,
+            },
+        );
+
+        assert!(
+            session
+                .complete_represented_quest_after_add_if_ready_like_cpp(&reward_quest)
+                .await
+        );
+
+        assert_eq!(session.player_gold_like_cpp(), 100);
+        assert!(!session.player_quests.contains_key(&reward_quest_id));
+        assert!(
+            !session
+                .player_quests
+                .contains_key(&money_objective_quest_id)
+        );
+        assert!(session.rewarded_quests.contains(&reward_quest_id));
+        assert!(session.rewarded_quests.contains(&money_objective_quest_id));
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn currency_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_511;
+        let currency_id = 395;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_CURRENCY_LIKE_CPP,
+            order: 0,
+            storage_index: -1,
+            object_id: currency_id as i32,
+            amount: 200,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_currency_types_store(Arc::new(wow_data::CurrencyTypesStore::from_entries([
+            currency_entry(currency_id),
+        ])));
+        session
+            .add_currency_quest_reward_like_cpp(
+                currency_id,
+                100,
+                CurrencyGainSourceLikeCpp::QuestReward,
+            )
+            .expect("currency store")
+            .expect("currency gain");
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+        let _ = drain_server_opcodes(&send_rx);
+
+        session.currency_changed_like_cpp(currency_id, 100).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::SetCurrency,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn have_currency_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_512;
+        let currency_id = 395;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_HAVE_CURRENCY_LIKE_CPP,
+            order: 0,
+            storage_index: 0,
+            object_id: currency_id as i32,
+            amount: 100,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session.currency_changed_like_cpp(currency_id, 100).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddCredit,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn obtain_currency_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_513;
+        let currency_id = 395;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_OBTAIN_CURRENCY_LIKE_CPP,
+            order: 0,
+            storage_index: 0,
+            object_id: currency_id as i32,
+            amount: 100,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session.currency_changed_like_cpp(currency_id, 100).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddCredit,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn reputation_min_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_508;
+        let faction_id = 7;
+        let rep_list_id: u32 = 5;
+        let mut faction = FactionEntry::for_test_like_cpp(faction_id, rep_list_id as i16);
+        faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_MIN_REPUTATION_LIKE_CPP,
+            order: 0,
+            storage_index: -1,
+            object_id: faction_id as i32,
+            amount: 1_000,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_faction_store(Arc::new(FactionStore::from_entries([faction])));
+        session
+            .reputation_mgr_like_cpp_mut()
+            .get_state_mut(rep_list_id)
+            .expect("reputation state")
+            .standing = 900;
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+
+        session.reputation_changed_like_cpp(faction_id, 100).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn increase_reputation_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_509;
+        let faction_id = 7;
+        let rep_list_id: u32 = 5;
+        let mut faction = FactionEntry::for_test_like_cpp(faction_id, rep_list_id as i16);
+        faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_INCREASE_REPUTATION_LIKE_CPP,
+            order: 0,
+            storage_index: 0,
+            object_id: faction_id as i32,
+            amount: 100,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_faction_store(Arc::new(FactionStore::from_entries([faction])));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        session.reputation_changed_like_cpp(faction_id, 100).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddCredit,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn reputation_max_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_510;
+        let faction_id = 7;
+        let rep_list_id: u32 = 5;
+        let mut faction = FactionEntry::for_test_like_cpp(faction_id, rep_list_id as i16);
+        faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_MAX_REPUTATION_LIKE_CPP,
+            order: 0,
+            storage_index: -1,
+            object_id: faction_id as i32,
+            amount: 1_000,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_faction_store(Arc::new(FactionStore::from_entries([faction])));
+        session
+            .reputation_mgr_like_cpp_mut()
+            .get_state_mut(rep_list_id)
+            .expect("reputation state")
+            .standing = 1_100;
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+
+        session.reputation_changed_like_cpp(faction_id, -100).await;
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
     }
 
     fn seasonal_quest_v2_store_like_cpp(
@@ -18991,6 +22009,8 @@ mod tests {
                 quest_id: 100,
                 status: 1,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: vec![],
                 slot: 0,
             },
@@ -19001,6 +22021,8 @@ mod tests {
                 quest_id: 101,
                 status: 2,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: vec![],
                 slot: 0,
             },
@@ -25349,6 +28371,684 @@ mod tests {
         );
     }
 
+    fn creature_template_lifecycle_store_for_test(
+        entries: impl IntoIterator<Item = u32>,
+    ) -> wow_data::CreatureTemplateLifecycleStoreLikeCpp {
+        wow_data::CreatureTemplateLifecycleStoreLikeCpp::from_templates(entries.into_iter().map(
+            |entry| wow_data::CreatureTemplateLifecycleRecordLikeCpp {
+                entry,
+                name: format!("Creature {entry}"),
+                faction: 14,
+                speed_walk: 1.0,
+                speed_run: 1.0,
+                scale: 1.0,
+                classification: 0,
+                creature_type: 0,
+                unit_class: 1,
+                vehicle_id: 0,
+                movement_type: 0,
+                flags_extra: 0,
+                string_id: String::new(),
+                regen_health: true,
+                spells: [0; wow_data::MAX_CREATURE_SPELLS_LIKE_CPP],
+                models: Vec::new(),
+            },
+        ))
+    }
+
+    fn lfg_dungeon_entry_for_test(
+        id: u32,
+        map_id: i16,
+        difficulty_id: u8,
+        target_level: u8,
+    ) -> wow_data::LfgDungeonsEntry {
+        wow_data::LfgDungeonsEntry {
+            id,
+            name: String::new(),
+            description: String::new(),
+            min_level: 0,
+            max_level: 0,
+            type_id: 0,
+            subtype: 0,
+            faction: 0,
+            icon_texture_file_id: 0,
+            rewards_bg_texture_file_id: 0,
+            popup_bg_texture_file_id: 0,
+            expansion_level: 0,
+            map_id,
+            difficulty_id,
+            min_gear: 0.0,
+            group_id: 0,
+            order_index: 0,
+            required_player_condition_id: 0,
+            target_level,
+            target_level_min: 0,
+            target_level_max: 0,
+            random_id: 0,
+            scenario_id: 0,
+            final_encounter_id: 0,
+            count_tank: 0,
+            count_healer: 0,
+            count_damage: 0,
+            min_count_tank: 0,
+            min_count_healer: 0,
+            min_count_damage: 0,
+            bonus_reputation_amount: 0,
+            mentor_item_level: 0,
+            mentor_char_level: 0,
+            flags: [0; 2],
+        }
+    }
+
+    fn configure_single_creature_kill_reputation_for_test(session: &mut WorldSession) {
+        let mut faction = FactionEntry::for_test_like_cpp(7, 5);
+        faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let faction_store = FactionStore::from_entries([faction]);
+        let creature_template_store = creature_template_lifecycle_store_for_test([9001]);
+        let (onkill_store, report) =
+            wow_data::reputation::CreatureOnKillReputationStoreLikeCpp::from_rows_like_cpp(
+                [wow_data::reputation::CreatureOnKillReputationRowLikeCpp {
+                    creature_id: 9001,
+                    entry: wow_data::reputation::CreatureOnKillReputationEntryLikeCpp {
+                        rep_faction_1: 7,
+                        rep_faction_2: 0,
+                        reputation_max_cap_1: wow_data::reputation::ReputationRankLikeCpp::Exalted
+                            .as_u8(),
+                        rep_value_1: 250,
+                        reputation_max_cap_2: 0,
+                        rep_value_2: 0,
+                        is_team_award_1: false,
+                        is_team_award_2: false,
+                        team_dependent: false,
+                    },
+                }],
+                &creature_template_store,
+                &faction_store,
+            );
+        assert_eq!(report.loaded, 1);
+        session.set_faction_store(Arc::new(faction_store));
+        session.set_creature_onkill_reputation_store(Arc::new(onkill_store));
+    }
+
+    fn configure_two_player_group_for_reputation_test(
+        session: &mut WorldSession,
+        player_guid: ObjectGuid,
+        other_guid: ObjectGuid,
+    ) {
+        let (other_tx, _other_rx) = flume::bounded(10);
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let mut other_info = broadcast_info(other_guid, other_tx);
+        other_info.map_id = 0;
+        other_info.position = Position::new(10.0, 10.0, 0.0, 0.0);
+        other_info.level = 80;
+        other_info.is_alive = true;
+        player_registry.insert(other_guid, other_info);
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(other_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+    }
+
+    fn reputation_aura_for_test(
+        slot: u8,
+        effect: RepresentedAuraEffectLikeCpp,
+        amount: i32,
+        misc_value: Option<i32>,
+    ) -> AuraApplication {
+        AuraApplication {
+            spell_id: 69_500 + i32::from(slot),
+            caster_guid: ObjectGuid::EMPTY,
+            slot,
+            duration_total: 30_000,
+            duration_remaining: 30_000,
+            stack_count: 1,
+            aura_flags: 0x0000_0001,
+            aura_interrupt_flags: 0,
+            aura_interrupt_flags2: 0,
+            represented_effect: Some(effect),
+            represented_amount: amount,
+            represented_misc_value: misc_value,
+            represented_multiplier: 1.0,
+            applied_at: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn creature_kill_reputation_mutates_and_sends_state_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let creature_guid = test_creature_guid(69201);
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+
+        let mut faction = FactionEntry::for_test_like_cpp(7, 5);
+        faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let faction_store = FactionStore::from_entries([faction]);
+        let creature_template_store = creature_template_lifecycle_store_for_test([9001]);
+        let (onkill_store, report) =
+            wow_data::reputation::CreatureOnKillReputationStoreLikeCpp::from_rows_like_cpp(
+                [wow_data::reputation::CreatureOnKillReputationRowLikeCpp {
+                    creature_id: 9001,
+                    entry: wow_data::reputation::CreatureOnKillReputationEntryLikeCpp {
+                        rep_faction_1: 7,
+                        rep_faction_2: 0,
+                        reputation_max_cap_1: wow_data::reputation::ReputationRankLikeCpp::Exalted
+                            .as_u8(),
+                        rep_value_1: 250,
+                        reputation_max_cap_2: 0,
+                        rep_value_2: 0,
+                        is_team_award_1: false,
+                        is_team_award_2: false,
+                        team_dependent: false,
+                    },
+                }],
+                &creature_template_store,
+                &faction_store,
+            );
+        assert_eq!(report.loaded, 1);
+
+        session.set_faction_store(Arc::new(faction_store));
+        session.set_creature_onkill_reputation_store(Arc::new(onkill_store));
+
+        session.reward_reputation_from_creature_kill_like_cpp(9001, creature_guid, 80, 1.0);
+
+        let state = session
+            .reputation_mgr_like_cpp()
+            .get_state(5)
+            .expect("faction state");
+        assert_eq!(state.standing, 250);
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::CreatureKillReputationAwarded {
+                    creature_guid,
+                    faction_id: 7,
+                    reputation: 250,
+                    spillover_only: false,
+                }
+            ]
+        );
+
+        let packet = drain_server_packet_bytes(&send_rx)
+            .into_iter()
+            .find(|bytes| {
+                wow_packet::WorldPacket::from_bytes(bytes).server_opcode()
+                    == Some(ServerOpcodes::SetFactionStanding)
+            })
+            .expect("set faction standing packet");
+        let mut reader = wow_packet::WorldPacket::from_bytes(&packet);
+        reader.skip_opcode();
+        assert_eq!(reader.read_float().unwrap(), 0.0);
+        assert_eq!(reader.read_uint32().unwrap(), 1);
+        assert_eq!(reader.read_int32().unwrap(), 5);
+        assert_eq!(reader.read_int32().unwrap(), 250);
+        assert!(!reader.read_bit().unwrap());
+    }
+
+    #[tokio::test]
+    async fn creature_kill_reputation_applies_group_rate_outside_dungeon_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let manager = shared_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 69_401);
+        let other_guid = ObjectGuid::create_player(1, 69_402);
+        let creature_guid = test_creature_guid(69_401);
+        session.set_player_guid(Some(player_guid));
+        session.set_loaded_player_identity_like_cpp(0, 1, 1, 80, 0);
+        session.set_player_map_position_like_cpp(0, Position::new(10.0, 10.0, 0.0, 0.0));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        configure_two_player_group_for_reputation_test(&mut session, player_guid, other_guid);
+        configure_single_creature_kill_reputation_for_test(&mut session);
+        register_test_creature(&mut session, manager, creature_guid, 50);
+
+        session.apply_damage(creature_guid, 100).await.unwrap();
+
+        assert_eq!(
+            session
+                .reputation_mgr_like_cpp()
+                .get_state(5)
+                .unwrap()
+                .standing,
+            125
+        );
+        assert_eq!(
+            session
+                .represented_creature_kill_events_like_cpp()
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    RepresentedCreatureKillEventLikeCpp::CreatureKillReputationAwarded {
+                        creature_guid: guid,
+                        faction_id: 7,
+                        reputation: 125,
+                        spillover_only: false,
+                    } if *guid == creature_guid
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn creature_kill_reputation_forces_full_rate_in_dungeon_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let manager = shared_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 69_403);
+        let other_guid = ObjectGuid::create_player(1, 69_404);
+        let creature_guid = test_creature_guid(69_402);
+        session.set_player_guid(Some(player_guid));
+        session.set_loaded_player_identity_like_cpp(0, 1, 1, 80, 0);
+        session.set_player_map_position_like_cpp(0, Position::new(10.0, 10.0, 0.0, 0.0));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_INSTANCE,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        configure_two_player_group_for_reputation_test(&mut session, player_guid, other_guid);
+        configure_single_creature_kill_reputation_for_test(&mut session);
+        register_test_creature(&mut session, manager, creature_guid, 50);
+
+        session.apply_damage(creature_guid, 100).await.unwrap();
+
+        assert_eq!(
+            session
+                .reputation_mgr_like_cpp()
+                .get_state(5)
+                .unwrap()
+                .standing,
+            250
+        );
+    }
+
+    #[test]
+    fn creature_kill_reputation_applies_generic_and_faction_auras_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let creature_guid = test_creature_guid(69_501);
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        configure_single_creature_kill_reputation_for_test(&mut session);
+        session.visible_auras.insert(
+            1,
+            reputation_aura_for_test(1, RepresentedAuraEffectLikeCpp::ModReputationGain, 20, None),
+        );
+        session.visible_auras.insert(
+            2,
+            reputation_aura_for_test(
+                2,
+                RepresentedAuraEffectLikeCpp::ModFactionReputationGain,
+                30,
+                Some(7),
+            ),
+        );
+        session.visible_auras.insert(
+            3,
+            reputation_aura_for_test(
+                3,
+                RepresentedAuraEffectLikeCpp::ModFactionReputationGain,
+                200,
+                Some(8),
+            ),
+        );
+
+        session.reward_reputation_from_creature_kill_like_cpp(9001, creature_guid, 80, 1.0);
+
+        assert_eq!(
+            session
+                .reputation_mgr_like_cpp()
+                .get_state(5)
+                .unwrap()
+                .standing,
+            375
+        );
+        assert_eq!(
+            session
+                .represented_creature_kill_events_like_cpp()
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    RepresentedCreatureKillEventLikeCpp::CreatureKillReputationAwarded {
+                        creature_guid: guid,
+                        faction_id: 7,
+                        reputation: 375,
+                        spillover_only: false,
+                    } if *guid == creature_guid
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn quest_reputation_gain_respects_no_quest_bonus_aura_gate_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        session.visible_auras.insert(
+            1,
+            reputation_aura_for_test(1, RepresentedAuraEffectLikeCpp::ModReputationGain, 25, None),
+        );
+
+        assert_eq!(
+            session.calculate_reputation_gain_like_cpp(
+                ReputationGainSourceLikeCpp::Quest,
+                80,
+                100,
+                7,
+                false,
+            ),
+            125
+        );
+        assert_eq!(
+            session.calculate_reputation_gain_like_cpp(
+                ReputationGainSourceLikeCpp::Quest,
+                80,
+                100,
+                7,
+                true,
+            ),
+            100
+        );
+    }
+
+    #[test]
+    fn gray_level_matches_cpp_formula_and_script_override_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        assert_eq!(session.gray_level(6), 0);
+        assert_eq!(session.gray_level(7), 0);
+        assert_eq!(session.gray_level(34), 24);
+        assert_eq!(session.gray_level(35), 25);
+        assert_eq!(session.gray_level(39), 29);
+        assert_eq!(session.gray_level(60), 50);
+        assert_eq!(session.gray_level(80), 70);
+
+        session.set_represented_gray_level_script_override_like_cpp(80, 79);
+        assert_eq!(session.gray_level(80), 79);
+    }
+
+    #[test]
+    fn reputation_low_level_rate_uses_script_adjusted_gray_level_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        session.set_reputation_rates_like_cpp(wow_network::ReputationRatesLikeCpp {
+            low_level_quest: 0.5,
+            ..wow_network::ReputationRatesLikeCpp::default()
+        });
+
+        assert_eq!(
+            session.calculate_reputation_gain_like_cpp(
+                ReputationGainSourceLikeCpp::Quest,
+                75,
+                100,
+                7,
+                false,
+            ),
+            100
+        );
+
+        session.set_represented_gray_level_script_override_like_cpp(80, 79);
+        assert_eq!(
+            session.calculate_reputation_gain_like_cpp(
+                ReputationGainSourceLikeCpp::Quest,
+                75,
+                100,
+                7,
+                false,
+            ),
+            50
+        );
+    }
+
+    #[test]
+    fn reputation_gain_applies_recruit_a_friend_bonus_for_non_spell_sources_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 1);
+        let recruit_guid = ObjectGuid::create_player(1, 2);
+        session.set_player_guid(Some(player_guid));
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_recruiter_id_like_cpp(2);
+        session.set_reputation_rates_like_cpp(wow_network::ReputationRatesLikeCpp {
+            recruit_a_friend_bonus: 0.1,
+            recruit_a_friend_distance: 100.0,
+            ..wow_network::ReputationRatesLikeCpp::default()
+        });
+
+        let (recruit_tx, _recruit_rx) = flume::bounded(10);
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let mut recruit_info = broadcast_info(recruit_guid, recruit_tx);
+        recruit_info.map_id = 571;
+        recruit_info.position = Position::new(25.0, 0.0, 0.0, 0.0);
+        recruit_info.account_id = 2;
+        recruit_info.recruiter_id = 0;
+        player_registry.insert(recruit_guid, recruit_info);
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(recruit_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert_eq!(
+            session.calculate_reputation_gain_like_cpp(
+                ReputationGainSourceLikeCpp::Quest,
+                80,
+                100,
+                7,
+                false,
+            ),
+            110
+        );
+        assert_eq!(
+            session.calculate_reputation_gain_like_cpp(
+                ReputationGainSourceLikeCpp::Spell,
+                80,
+                100,
+                7,
+                false,
+            ),
+            100,
+            "C++ skips Recruit-A-Friend for REPUTATION_SOURCE_SPELL"
+        );
+    }
+
+    #[test]
+    fn reputation_gain_recruit_a_friend_bonus_requires_configured_distance_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 1);
+        let recruit_guid = ObjectGuid::create_player(1, 2);
+        session.set_player_guid(Some(player_guid));
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_recruiter_id_like_cpp(2);
+        session.set_reputation_rates_like_cpp(wow_network::ReputationRatesLikeCpp {
+            recruit_a_friend_bonus: 0.1,
+            recruit_a_friend_distance: 10.0,
+            ..wow_network::ReputationRatesLikeCpp::default()
+        });
+
+        let (recruit_tx, _recruit_rx) = flume::bounded(10);
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let mut recruit_info = broadcast_info(recruit_guid, recruit_tx);
+        recruit_info.map_id = 571;
+        recruit_info.position = Position::new(25.0, 0.0, 0.0, 0.0);
+        recruit_info.account_id = 2;
+        player_registry.insert(recruit_guid, recruit_info);
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(recruit_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert_eq!(
+            session.calculate_reputation_gain_like_cpp(
+                ReputationGainSourceLikeCpp::Quest,
+                80,
+                100,
+                7,
+                false,
+            ),
+            100
+        );
+    }
+
+    #[test]
+    fn creature_kill_reputation_uses_championing_faction_in_wrath_non_raid_dungeon_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let creature_guid = test_creature_guid(69301);
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        session.set_championing_faction_like_cpp(99);
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_INSTANCE,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.set_lfg_dungeons_store(Arc::new(wow_data::LfgDungeonsStore::from_entries([
+            lfg_dungeon_entry_for_test(1, 571, 0, WRATH_OF_THE_LICH_KING_MAX_LEVEL_LIKE_CPP),
+        ])));
+
+        let mut table_faction = FactionEntry::for_test_like_cpp(7, 5);
+        table_faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let mut champion_faction = FactionEntry::for_test_like_cpp(99, 9);
+        champion_faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let faction_store = FactionStore::from_entries([table_faction, champion_faction]);
+        let creature_template_store = creature_template_lifecycle_store_for_test([9001]);
+        let (onkill_store, report) =
+            wow_data::reputation::CreatureOnKillReputationStoreLikeCpp::from_rows_like_cpp(
+                [wow_data::reputation::CreatureOnKillReputationRowLikeCpp {
+                    creature_id: 9001,
+                    entry: wow_data::reputation::CreatureOnKillReputationEntryLikeCpp {
+                        rep_faction_1: 7,
+                        rep_faction_2: 0,
+                        reputation_max_cap_1: wow_data::reputation::ReputationRankLikeCpp::Exalted
+                            .as_u8(),
+                        rep_value_1: 250,
+                        reputation_max_cap_2: 0,
+                        rep_value_2: 0,
+                        is_team_award_1: false,
+                        is_team_award_2: false,
+                        team_dependent: false,
+                    },
+                }],
+                &creature_template_store,
+                &faction_store,
+            );
+        assert_eq!(report.loaded, 1);
+
+        session.set_faction_store(Arc::new(faction_store));
+        session.set_creature_onkill_reputation_store(Arc::new(onkill_store));
+
+        session.reward_reputation_from_creature_kill_like_cpp(9001, creature_guid, 80, 1.0);
+
+        assert_eq!(
+            session
+                .reputation_mgr_like_cpp()
+                .get_state(5)
+                .unwrap()
+                .standing,
+            0
+        );
+        assert_eq!(
+            session
+                .reputation_mgr_like_cpp()
+                .get_state(9)
+                .unwrap()
+                .standing,
+            250
+        );
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::CreatureKillReputationAwarded {
+                    creature_guid,
+                    faction_id: 99,
+                    reputation: 250,
+                    spillover_only: false,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn creature_kill_reputation_respects_team_dependent_horde_branch_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let creature_guid = test_creature_guid(69202);
+        session.set_loaded_player_identity_like_cpp(571, 2, 1, 80, 0);
+
+        let mut alliance_faction = FactionEntry::for_test_like_cpp(7, 5);
+        alliance_faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let mut horde_faction = FactionEntry::for_test_like_cpp(8, 6);
+        horde_faction.reputation_flags[0] = ReputationFlagsLikeCpp::VISIBLE.bits();
+        let faction_store = FactionStore::from_entries([alliance_faction, horde_faction]);
+        let creature_template_store = creature_template_lifecycle_store_for_test([9001]);
+        let (onkill_store, report) =
+            wow_data::reputation::CreatureOnKillReputationStoreLikeCpp::from_rows_like_cpp(
+                [wow_data::reputation::CreatureOnKillReputationRowLikeCpp {
+                    creature_id: 9001,
+                    entry: wow_data::reputation::CreatureOnKillReputationEntryLikeCpp {
+                        rep_faction_1: 7,
+                        rep_faction_2: 8,
+                        reputation_max_cap_1: wow_data::reputation::ReputationRankLikeCpp::Exalted
+                            .as_u8(),
+                        rep_value_1: 250,
+                        reputation_max_cap_2: wow_data::reputation::ReputationRankLikeCpp::Exalted
+                            .as_u8(),
+                        rep_value_2: 400,
+                        is_team_award_1: false,
+                        is_team_award_2: false,
+                        team_dependent: true,
+                    },
+                }],
+                &creature_template_store,
+                &faction_store,
+            );
+        assert_eq!(report.loaded, 1);
+
+        session.set_faction_store(Arc::new(faction_store));
+        session.set_creature_onkill_reputation_store(Arc::new(onkill_store));
+
+        session.reward_reputation_from_creature_kill_like_cpp(9001, creature_guid, 80, 1.0);
+
+        assert_eq!(
+            session
+                .reputation_mgr_like_cpp()
+                .get_state(5)
+                .unwrap()
+                .standing,
+            0
+        );
+        assert_eq!(
+            session
+                .reputation_mgr_like_cpp()
+                .get_state(6)
+                .unwrap()
+                .standing,
+            400
+        );
+    }
+
     #[test]
     fn register_world_creature_mirrors_existing_canonical_map_like_cpp() {
         let (mut session, _, _) = make_session();
@@ -25995,6 +29695,7 @@ mod tests {
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
+            recruiter_id: 0,
             race: 1,
             class: 1,
             sex: 0,
@@ -26019,6 +29720,8 @@ mod tests {
                 quest_id: 100,
                 status: 1,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: vec![2, 3],
                 slot: 0,
             },
@@ -26089,6 +29792,8 @@ mod tests {
                 quest_id: 300,
                 status: 2,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: vec![7],
                 slot: 1,
             },
@@ -26609,6 +30314,7 @@ mod tests {
                 quest_type: 0,
                 quest_level: 1,
                 quest_max_scaling_level: 0,
+                quest_package_id: 0,
                 min_level: 1,
                 quest_sort_id: 0,
                 quest_info_id: 0,
@@ -26622,9 +30328,21 @@ mod tests {
                 reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
                 reward_spell: 0,
                 reward_honor: 0,
+                reward_title_id: 0,
+                reward_skill_line_id: 0,
+                reward_skill_points: 0,
+                reward_mail_template_id: 0,
+                reward_mail_delay_secs: 0,
+                reward_mail_sender_entry: 0,
+                reward_faction_ids: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+                reward_faction_values: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+                reward_faction_overrides: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+                reward_faction_cap_in: [0; wow_data::quest::QUEST_REWARD_REPUTATIONS_COUNT],
+                reward_faction_flags: 0,
                 source_item_id: 0,
                 source_item_count: 0,
                 source_spell_id: 0,
+                limit_time_secs: 0,
                 expansion: 0,
                 flags: 0,
                 flags_ex: 0,
@@ -26633,6 +30351,8 @@ mod tests {
                 event_id_for_quest: 0,
                 reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
                 reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+                reward_currencies: [0; wow_data::quest::QUEST_REWARD_CURRENCY_COUNT],
+                reward_currency_amounts: [0; wow_data::quest::QUEST_REWARD_CURRENCY_COUNT],
                 item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
                 item_drop_quantity: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
                 log_title: String::new(),
@@ -26667,6 +30387,7 @@ mod tests {
                 required_max_rep_faction: 0,
                 required_max_rep_value: 0,
                 reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
+                reward_choice_item_types: [0; wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
             },
         );
         session.set_quest_store(Arc::new(quest_store));
@@ -26676,6 +30397,8 @@ mod tests {
                 quest_id: 9_001,
                 status: 1,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: vec![0],
                 slot: 0,
             },
@@ -30490,10 +34213,7 @@ mod tests {
         session.set_canonical_map_manager(Arc::clone(&canonical));
         session.set_faction_store(Arc::new(
             wow_data::progression_rewards::FactionStore::from_entries([
-                wow_data::progression_rewards::FactionEntry {
-                    id: 72,
-                    reputation_index: 1,
-                },
+                wow_data::progression_rewards::FactionEntry::for_test_like_cpp(72, 1),
             ]),
         ));
         session.set_faction_template_store(Arc::new(
@@ -30573,10 +34293,7 @@ mod tests {
         session.set_canonical_map_manager(Arc::clone(&canonical));
         session.set_faction_store(Arc::new(
             wow_data::progression_rewards::FactionStore::from_entries([
-                wow_data::progression_rewards::FactionEntry {
-                    id: 72,
-                    reputation_index: 1,
-                },
+                wow_data::progression_rewards::FactionEntry::for_test_like_cpp(72, 1),
             ]),
         ));
         session.set_faction_template_store(Arc::new(
@@ -30659,7 +34376,7 @@ mod tests {
                 wow_data::progression_rewards::FactionTemplateEntry {
                     id: 14,
                     faction: 72,
-                    flags: FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP,
+                    flags: wow_data::progression_rewards::FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP,
                     faction_group: 0,
                     friend_group: 0,
                     enemy_group: 0,
@@ -30725,10 +34442,7 @@ mod tests {
         session.set_canonical_map_manager(Arc::clone(&canonical));
         session.set_faction_store(Arc::new(
             wow_data::progression_rewards::FactionStore::from_entries([
-                wow_data::progression_rewards::FactionEntry {
-                    id: 72,
-                    reputation_index: -1,
-                },
+                wow_data::progression_rewards::FactionEntry::for_test_like_cpp(72, -1),
             ]),
         ));
         session.set_faction_template_store(Arc::new(
@@ -31416,6 +35130,68 @@ mod tests {
             Some(InventoryType::Bag as u8)
         );
         assert_eq!(session.item_storage_template(101), None);
+    }
+
+    #[test]
+    fn item_limit_category_template_applies_conditions_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.set_player_class_like_cpp(1);
+        session.set_item_limit_category_store(Arc::new(ItemLimitCategoryStore::from_entries([
+            ItemLimitCategoryEntry {
+                id: 44,
+                name: "Limited".into(),
+                quantity: 1,
+                flags: wow_entities::ITEM_LIMIT_CATEGORY_MODE_HAVE,
+            },
+        ])));
+        session.set_item_limit_category_condition_store(Arc::new(
+            ItemLimitCategoryConditionStore::from_entries([
+                ItemLimitCategoryConditionEntry {
+                    id: 1,
+                    add_quantity: 2,
+                    player_condition_id: 700,
+                    parent_item_limit_category_id: 44,
+                },
+                ItemLimitCategoryConditionEntry {
+                    id: 2,
+                    add_quantity: 4,
+                    player_condition_id: 701,
+                    parent_item_limit_category_id: 44,
+                },
+                ItemLimitCategoryConditionEntry {
+                    id: 3,
+                    add_quantity: -1,
+                    player_condition_id: 999,
+                    parent_item_limit_category_id: 44,
+                },
+                ItemLimitCategoryConditionEntry {
+                    id: 4,
+                    add_quantity: 9,
+                    player_condition_id: 0,
+                    parent_item_limit_category_id: 45,
+                },
+            ]),
+        ));
+        session.set_player_condition_store(Arc::new(PlayerConditionStore::from_entries([
+            PlayerConditionEntry {
+                id: 700,
+                class_mask: 1,
+                ..PlayerConditionEntry::default()
+            },
+            PlayerConditionEntry {
+                id: 701,
+                class_mask: 2,
+                ..PlayerConditionEntry::default()
+            },
+        ])));
+
+        let limit = session
+            .item_limit_category_template_like_cpp(44)
+            .expect("limit category should resolve");
+
+        assert_eq!(limit.id, 44);
+        assert_eq!(limit.quantity, 2);
+        assert_eq!(limit.flags, wow_entities::ITEM_LIMIT_CATEGORY_MODE_HAVE);
     }
 
     #[test]
@@ -33508,6 +37284,273 @@ mod tests {
     }
 
     #[test]
+    fn direct_inventory_store_plan_counts_represented_bag_contents_for_limit_category_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let bag_guid = ObjectGuid::create_item(1, 800);
+        let child_guid = ObjectGuid::create_item(1, 801);
+        session.set_player_guid(Some(player_guid));
+        session.set_item_store(Arc::new(ItemStore::from_records([
+            ItemRecord {
+                id: 600,
+                class_id: ItemClass::Container as u8,
+                subclass_id: 0,
+                material: 0,
+                inventory_type: InventoryType::Bag as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+            ItemRecord {
+                id: 700,
+                class_id: ItemClass::Consumable as u8,
+                subclass_id: 0,
+                material: 0,
+                inventory_type: InventoryType::NonEquip as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+        ])));
+        session.set_item_stats_store(Arc::new(ItemStatsStore::from_sparse_templates([
+            (
+                600,
+                ItemSparseTemplateEntry {
+                    flags: [0, 0, 0, 0],
+                    bag_family: 0,
+                    start_quest_id: 0,
+                    stackable: 1,
+                    max_count: 0,
+                    lock_id: 0,
+                    required_reputation_rank: 0,
+                    sell_price: 0,
+                    buy_price: 0,
+                    vendor_stack_count: 1,
+                    price_variance: 1.0,
+                    price_random_value: 1.0,
+                    max_durability: 0,
+                    limit_category: 0,
+                    instance_bound: 0,
+                    zone_bound: [0, 0],
+                    required_reputation_faction: 0,
+                    allowable_class: -1,
+                    required_expansion: 0,
+                    bonding: ItemBondingType::None as u8,
+                    container_slots: 4,
+                    inventory_type: InventoryType::Bag as i8,
+                },
+            ),
+            (
+                700,
+                ItemSparseTemplateEntry {
+                    flags: [0, 0, 0, 0],
+                    bag_family: 0,
+                    start_quest_id: 0,
+                    stackable: 20,
+                    max_count: 0,
+                    lock_id: 0,
+                    required_reputation_rank: 0,
+                    sell_price: 0,
+                    buy_price: 0,
+                    vendor_stack_count: 1,
+                    price_variance: 1.0,
+                    price_random_value: 1.0,
+                    max_durability: 0,
+                    limit_category: 44,
+                    instance_bound: 0,
+                    zone_bound: [0, 0],
+                    required_reputation_faction: 0,
+                    allowable_class: -1,
+                    required_expansion: 0,
+                    bonding: ItemBondingType::None as u8,
+                    container_slots: 0,
+                    inventory_type: InventoryType::NonEquip as i8,
+                },
+            ),
+        ])));
+        session.set_item_limit_category_store(Arc::new(ItemLimitCategoryStore::from_entries([
+            ItemLimitCategoryEntry {
+                id: 44,
+                name: "Have one".into(),
+                quantity: 1,
+                flags: wow_entities::ITEM_LIMIT_CATEGORY_MODE_HAVE,
+            },
+        ])));
+
+        session.inventory_items.insert(
+            INVENTORY_SLOT_BAG_START,
+            InventoryItem {
+                guid: bag_guid,
+                entry_id: 600,
+                db_guid: 800,
+                inventory_type: Some(InventoryType::Bag as u8),
+            },
+        );
+        let bag = session.make_inventory_item_object(
+            bag_guid,
+            600,
+            player_guid,
+            1,
+            0,
+            ItemContext::None,
+            INVENTORY_SLOT_BAG_START,
+        );
+        session.insert_inventory_item_object(bag);
+        let mut child = session.make_inventory_item_object(
+            child_guid,
+            700,
+            player_guid,
+            1,
+            0,
+            ItemContext::None,
+            0,
+        );
+        child.set_container_guid_and_slot(bag_guid, 0);
+        session.insert_inventory_item_object(child);
+
+        let (result, dest, no_space) = session
+            .plan_store_new_direct_inventory_item(700, 1)
+            .expect("player snapshot should exist");
+
+        assert_eq!(result, InventoryResult::ItemMaxLimitCategoryCountExceededIs);
+        assert!(dest.is_empty());
+        assert_eq!(no_space, Some(1));
+    }
+
+    #[test]
+    fn direct_inventory_store_plan_allocates_represented_bag_slot_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let bag_guid = ObjectGuid::create_item(1, 850);
+        session.set_player_guid(Some(player_guid));
+        session.set_item_store(Arc::new(ItemStore::from_records([
+            ItemRecord {
+                id: 600,
+                class_id: ItemClass::Container as u8,
+                subclass_id: 0,
+                material: 0,
+                inventory_type: InventoryType::Bag as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+            ItemRecord {
+                id: 700,
+                class_id: ItemClass::Consumable as u8,
+                subclass_id: 0,
+                material: 0,
+                inventory_type: InventoryType::NonEquip as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+            ItemRecord {
+                id: 701,
+                class_id: ItemClass::Consumable as u8,
+                subclass_id: 0,
+                material: 0,
+                inventory_type: InventoryType::NonEquip as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+        ])));
+        let sparse = |inventory_type: InventoryType,
+                      stackable: i32,
+                      container_slots: u8|
+         -> ItemSparseTemplateEntry {
+            ItemSparseTemplateEntry {
+                flags: [0, 0, 0, 0],
+                bag_family: 0,
+                start_quest_id: 0,
+                stackable,
+                max_count: 0,
+                lock_id: 0,
+                required_reputation_rank: 0,
+                sell_price: 0,
+                buy_price: 0,
+                vendor_stack_count: 1,
+                price_variance: 1.0,
+                price_random_value: 1.0,
+                max_durability: 0,
+                limit_category: 0,
+                instance_bound: 0,
+                zone_bound: [0, 0],
+                required_reputation_faction: 0,
+                allowable_class: -1,
+                required_expansion: 0,
+                bonding: ItemBondingType::None as u8,
+                container_slots,
+                inventory_type: inventory_type as i8,
+            }
+        };
+        session.set_item_stats_store(Arc::new(ItemStatsStore::from_sparse_templates([
+            (600, sparse(InventoryType::Bag, 1, 4)),
+            (700, sparse(InventoryType::NonEquip, 20, 0)),
+            (701, sparse(InventoryType::NonEquip, 20, 0)),
+        ])));
+
+        session.inventory_items.insert(
+            INVENTORY_SLOT_BAG_START,
+            InventoryItem {
+                guid: bag_guid,
+                entry_id: 600,
+                db_guid: 850,
+                inventory_type: Some(InventoryType::Bag as u8),
+            },
+        );
+        let bag = session.make_inventory_item_object(
+            bag_guid,
+            600,
+            player_guid,
+            1,
+            0,
+            ItemContext::None,
+            INVENTORY_SLOT_BAG_START,
+        );
+        session.insert_inventory_item_object(bag);
+
+        for slot_offset in 0..INVENTORY_DEFAULT_SIZE {
+            let slot = INVENTORY_SLOT_ITEM_START + slot_offset;
+            let db_guid = 900 + u64::from(slot_offset);
+            let guid = ObjectGuid::create_item(1, db_guid as i64);
+            session.inventory_items.insert(
+                slot,
+                InventoryItem {
+                    guid,
+                    entry_id: 701,
+                    db_guid,
+                    inventory_type: None,
+                },
+            );
+            let item = session.make_inventory_item_object(
+                guid,
+                701,
+                player_guid,
+                1,
+                0,
+                ItemContext::None,
+                slot,
+            );
+            session.insert_inventory_item_object(item);
+        }
+
+        let (result, dest, no_space) = session
+            .plan_store_new_direct_inventory_item(700, 3)
+            .expect("player snapshot should exist");
+
+        assert_eq!(result, InventoryResult::Ok);
+        assert_eq!(no_space, None);
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                (u16::from(INVENTORY_SLOT_BAG_START) << 8) | 0,
+                3,
+            )]
+        );
+    }
+
+    #[test]
     fn spell_item_enchantment_helpers_use_cpp_store_fields() {
         let (mut session, _, _) = make_session();
         session.set_spell_item_enchantment_store(Arc::new(
@@ -33829,6 +37872,286 @@ mod tests {
             enemies,
             friend: [0; 8],
         }
+    }
+
+    #[test]
+    fn represented_faction_reaction_static_branch_uses_forced_rank_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 72, 0, 0, 0),
+                faction_template_entry(2, 930, 0, 0, 0),
+            ]),
+        ));
+        session
+            .reputation_mgr_like_cpp_mut()
+            .apply_force_reaction_like_cpp(
+                72,
+                wow_data::reputation::ReputationRankLikeCpp::Hostile,
+                true,
+            );
+
+        assert_eq!(
+            session.represented_faction_reaction_to_like_cpp(
+                RepresentedFactionReactionInputLikeCpp {
+                    source_faction_template_id: 1,
+                    target_faction_template_id: 2,
+                    target_has_player_owner: true,
+                    target_player_owner_is_current_session: true,
+                    target_player_contested_pvp: false,
+                    target_is_unit: true,
+                    target_ignores_reputation: false,
+                },
+            ),
+            wow_data::reputation::ReputationRankLikeCpp::Hostile
+        );
+    }
+
+    #[test]
+    fn represented_faction_reaction_static_branch_uses_player_reputation_and_at_war_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.set_loaded_player_identity_like_cpp(0, 1, 1, 1, 0);
+        session.set_faction_store(Arc::new(FactionStore::from_entries([
+            FactionEntry::for_test_like_cpp(72, 1),
+        ])));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 72, 0, 0, 0),
+                faction_template_entry(2, 930, 0, 0, 0),
+            ]),
+        ));
+        let state = session
+            .reputation_mgr_like_cpp_mut()
+            .get_state_mut(1)
+            .unwrap();
+        state.standing = 3_500;
+
+        let input = RepresentedFactionReactionInputLikeCpp {
+            source_faction_template_id: 1,
+            target_faction_template_id: 2,
+            target_has_player_owner: true,
+            target_player_owner_is_current_session: true,
+            target_player_contested_pvp: false,
+            target_is_unit: true,
+            target_ignores_reputation: false,
+        };
+
+        assert_eq!(
+            session.represented_faction_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Friendly
+        );
+
+        session
+            .reputation_mgr_like_cpp_mut()
+            .get_state_mut(1)
+            .unwrap()
+            .flags |= ReputationFlagsLikeCpp::AT_WAR;
+
+        assert_eq!(
+            session.represented_faction_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Neutral
+        );
+    }
+
+    #[test]
+    fn represented_faction_reaction_static_branch_uses_template_fallback_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let mut source = faction_template_entry(1, 72, 0, 0, 930);
+        let target = faction_template_entry(2, 930, 0, 0, 0);
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                source.clone(),
+                target.clone(),
+            ]),
+        ));
+
+        let input = RepresentedFactionReactionInputLikeCpp {
+            source_faction_template_id: 1,
+            target_faction_template_id: 2,
+            target_has_player_owner: false,
+            target_player_owner_is_current_session: false,
+            target_player_contested_pvp: false,
+            target_is_unit: true,
+            target_ignores_reputation: false,
+        };
+        assert_eq!(
+            session.represented_faction_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Hostile
+        );
+
+        source.enemies = [0; 8];
+        source.flags =
+            wow_data::progression_rewards::FACTION_TEMPLATE_FLAG_HOSTILE_BY_DEFAULT_LIKE_CPP;
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([source, target]),
+        ));
+        assert_eq!(
+            session.represented_faction_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Hostile
+        );
+    }
+
+    fn represented_get_reaction_input_like_cpp() -> RepresentedGetReactionInputLikeCpp {
+        RepresentedGetReactionInputLikeCpp {
+            self_faction_template_id: 1,
+            target_faction_template_id: 2,
+            same_object: false,
+            attackable_by_summoner: false,
+            same_charmer_or_owner_or_self: false,
+            self_has_player_owner: true,
+            target_has_player_owner: true,
+            target_player_owner_is_current_session: true,
+            target_owner_forced_rank_for_self: None,
+            same_player_owner: false,
+            duel_in_progress: false,
+            same_raid: false,
+            self_unit_player_controlled: true,
+            target_unit_player_controlled: true,
+            self_ffa_pvp: false,
+            target_ffa_pvp: false,
+            self_ignores_reputation: false,
+            target_ignores_reputation: false,
+            target_is_unit: true,
+            target_player_contested_pvp: false,
+        }
+    }
+
+    #[test]
+    fn represented_get_reaction_wrapper_top_branches_match_cpp() {
+        let (session, _pkt_tx, _send_rx) = make_session();
+        let mut input = represented_get_reaction_input_like_cpp();
+
+        input.same_object = true;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Friendly
+        );
+
+        input.same_object = false;
+        input.attackable_by_summoner = true;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Neutral
+        );
+
+        input.attackable_by_summoner = false;
+        input.same_charmer_or_owner_or_self = true;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Friendly
+        );
+    }
+
+    #[test]
+    fn represented_get_reaction_target_owner_forced_rank_branch_matches_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 72, 0, 0, 0),
+                faction_template_entry(2, 930, 0, 0, 0),
+            ]),
+        ));
+
+        let mut input = represented_get_reaction_input_like_cpp();
+        input.self_has_player_owner = false;
+        input.target_player_owner_is_current_session = false;
+        input.self_unit_player_controlled = false;
+        input.target_owner_forced_rank_for_self =
+            Some(wow_data::reputation::ReputationRankLikeCpp::Revered);
+
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Revered
+        );
+
+        input.self_faction_template_id = 99;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Neutral
+        );
+    }
+
+    #[test]
+    fn represented_get_reaction_player_controlled_owner_branches_match_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 72, 0, 0, 0),
+                faction_template_entry(2, 930, 0, 0, 0),
+            ]),
+        ));
+
+        let mut input = represented_get_reaction_input_like_cpp();
+        input.same_player_owner = true;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Friendly
+        );
+
+        input.same_player_owner = false;
+        input.duel_in_progress = true;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Hostile
+        );
+
+        input.duel_in_progress = false;
+        input.same_raid = true;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Friendly
+        );
+
+        input.same_raid = false;
+        input.self_ffa_pvp = true;
+        input.target_ffa_pvp = true;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Hostile
+        );
+    }
+
+    #[test]
+    fn represented_get_reaction_player_controlled_reputation_branch_matches_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.set_loaded_player_identity_like_cpp(0, 1, 1, 1, 0);
+        session.set_faction_store(Arc::new(FactionStore::from_entries([
+            FactionEntry::for_test_like_cpp(930, 2),
+        ])));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 72, 0, 0, 0),
+                faction_template_entry(2, 930, 0, 0, 0),
+            ]),
+        ));
+
+        let input = represented_get_reaction_input_like_cpp();
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Friendly
+        );
+
+        session
+            .reputation_mgr_like_cpp_mut()
+            .get_state_mut(2)
+            .unwrap()
+            .flags |= ReputationFlagsLikeCpp::AT_WAR;
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Hostile
+        );
+
+        session
+            .reputation_mgr_like_cpp_mut()
+            .apply_force_reaction_like_cpp(
+                930,
+                wow_data::reputation::ReputationRankLikeCpp::Hated,
+                true,
+            );
+        assert_eq!(
+            session.represented_get_reaction_to_like_cpp(input),
+            wow_data::reputation::ReputationRankLikeCpp::Hated
+        );
     }
 
     #[test]
@@ -37110,8 +41433,10 @@ mod tests {
             9_001,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_001,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37147,8 +41472,10 @@ mod tests {
             9_003,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_003,
-                status: 1,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37240,8 +41567,10 @@ mod tests {
             9_101,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_101,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37648,10 +41977,16 @@ mod tests {
         let mut pkt = WorldPacket::new_empty();
         pkt.write_packed_guid(&source_guid);
         pkt.write_uint32(quest_id);
-        // Keep this bounded test helper aligned with the current represented handler parser;
-        // exact C++ QuestChoiceItem bit/item/quantity wire parity remains outside #586.
-        pkt.write_uint32(choice_item_id);
-        pkt.write_uint32(loot_item_type);
+        // C++ QuestChoiceItem: 2-bit LootItemType, ItemInstance, int32 Quantity.
+        pkt.write_bits(loot_item_type, 2);
+        pkt.write_int32(choice_item_id as i32);
+        pkt.write_int32(0); // RandomPropertiesSeed
+        pkt.write_int32(0); // RandomPropertiesID
+        pkt.write_bit(false); // ItemBonus.has_value()
+        pkt.flush_bits();
+        pkt.write_bits(0, 6); // ItemModList.Values.size()
+        pkt.flush_bits();
+        pkt.write_int32(if choice_item_id == 0 { 0 } else { 1 });
         pkt
     }
 
@@ -37684,8 +42019,10 @@ mod tests {
             9_223,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_223,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37729,8 +42066,10 @@ mod tests {
             9_224,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_224,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37747,7 +42086,7 @@ mod tests {
 
         assert_eq!(
             session.player_quests.get(&9_224).map(|quest| quest.status),
-            Some(2)
+            Some(crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP)
         );
         assert!(!session.rewarded_quests.contains(&9_224));
         assert_eq!(session.player_gold_like_cpp(), 5);
@@ -37781,8 +42120,10 @@ mod tests {
             9_225,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_225,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37799,7 +42140,7 @@ mod tests {
 
         assert_eq!(
             session.player_quests.get(&9_225).map(|quest| quest.status),
-            Some(2)
+            Some(crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP)
         );
         assert!(!session.rewarded_quests.contains(&9_225));
         assert_eq!(session.player_gold_like_cpp(), 5);
@@ -37822,8 +42163,10 @@ mod tests {
             9_226,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_226,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37864,8 +42207,10 @@ mod tests {
             9_219,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_219,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37881,7 +42226,7 @@ mod tests {
         assert!(send_rx.try_recv().is_err());
         assert_eq!(
             session.player_quests.get(&9_219).map(|quest| quest.status),
-            Some(2)
+            Some(crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP)
         );
     }
 
@@ -37899,8 +42244,10 @@ mod tests {
             9_220,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_220,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -37917,7 +42264,7 @@ mod tests {
         assert!(send_rx.try_recv().is_err());
         assert_eq!(
             session.player_quests.get(&9_220).map(|quest| quest.status),
-            Some(2)
+            Some(crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP)
         );
     }
 
@@ -37936,8 +42283,10 @@ mod tests {
             9_218,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_218,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -38040,8 +42389,10 @@ mod tests {
             9_203,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_203,
-                status: 2,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -38105,8 +42456,10 @@ mod tests {
             9_206,
             crate::handlers::quest::PlayerQuestStatus {
                 quest_id: 9_206,
-                status: 1,
+                status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: Vec::new(),
                 slot: 0,
             },
@@ -38513,8 +42866,8 @@ mod tests {
         assert!(session.represented_gameobject_use_effects.is_empty());
     }
 
-    #[test]
-    fn gameobject_use_goober_records_player_preamble_hooks_like_cpp() {
+    #[tokio::test]
+    async fn gameobject_use_goober_records_player_preamble_hooks_like_cpp() {
         let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
@@ -38523,19 +42876,23 @@ mod tests {
         session.set_player_guid(Some(player_guid));
         session.set_player_position_like_cpp(position);
 
-        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
-            gameobject_guid,
-            777,
-            position,
-            player_guid,
-            wow_entities::GooberUseSource {
-                page_id: 123,
-                gossip_id: 456,
-                event_id: 55,
-                linked_trap_entry: 999,
-                ..Default::default()
-            },
-        ));
+        assert!(
+            session
+                .use_represented_gameobject_goober_preamble_like_cpp(
+                    gameobject_guid,
+                    777,
+                    position,
+                    player_guid,
+                    wow_entities::GooberUseSource {
+                        page_id: 123,
+                        gossip_id: 456,
+                        event_id: 55,
+                        linked_trap_entry: 999,
+                        ..Default::default()
+                    },
+                )
+                .await
+        );
 
         let mut expected = (ServerOpcodes::PageText as u16).to_le_bytes().to_vec();
         expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
@@ -38567,16 +42924,20 @@ mod tests {
         );
 
         session.represented_gameobject_use_effects.clear();
-        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
-            gameobject_guid,
-            777,
-            position,
-            player_guid,
-            wow_entities::GooberUseSource {
-                gossip_id: 456,
-                ..Default::default()
-            },
-        ));
+        assert!(
+            session
+                .use_represented_gameobject_goober_preamble_like_cpp(
+                    gameobject_guid,
+                    777,
+                    position,
+                    player_guid,
+                    wow_entities::GooberUseSource {
+                        gossip_id: 456,
+                        ..Default::default()
+                    },
+                )
+                .await
+        );
         assert_eq!(
             session.represented_gameobject_use_effects.first(),
             Some(&RepresentedGameObjectUseEffect::SendGossip {
@@ -38587,8 +42948,97 @@ mod tests {
         );
     }
 
-    #[test]
-    fn gameobject_use_goober_quest_gate_matches_cpp_incomplete_requirement() {
+    #[tokio::test]
+    async fn gameobject_use_goober_tracking_event_objective_auto_rewards_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 779, 9);
+        let quest_id = 12_502;
+        let gameobject_entry = 779;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: 2, // C++ QUEST_OBJECTIVE_GAMEOBJECT.
+            order: 0,
+            storage_index: 0,
+            object_id: gameobject_entry as i32,
+            amount: 1,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+
+        assert!(
+            session
+                .use_represented_gameobject_goober_preamble_like_cpp(
+                    gameobject_guid,
+                    gameobject_entry,
+                    Position::ZERO,
+                    player_guid,
+                    wow_entities::GooberUseSource::default(),
+                )
+                .await
+        );
+
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+        assert_eq!(
+            session.represented_quest_complete_status_updates_like_cpp(),
+            &[RepresentedQuestCompleteStatusUpdateLikeCpp {
+                quest_id,
+                old_status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                new_status: crate::conditions::QUEST_STATUS_COMPLETE_LIKE_CPP,
+                send_quest_update_called: true,
+                quest_slot_state_complete_represented: true,
+                quest_slot_state_live_update_unrepresented: true,
+                visible_gameobjects_or_spellclicks_refresh_unrepresented: true,
+                spell_area_runtime_unrepresented: true,
+                tracking_event_auto_reward_unrepresented: false,
+                quest_tracker_complete_time_unrepresented: true,
+                script_status_change_unrepresented: true,
+            }]
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestUpdateAddCredit,
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::KillCreditGo {
+                gameobject_guid,
+                player_guid,
+                entry: gameobject_entry,
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_use_goober_quest_gate_matches_cpp_incomplete_requirement() {
         let (mut session, _pkt_tx, _send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
@@ -38599,18 +43049,20 @@ mod tests {
         session.set_player_guid(Some(player_guid));
 
         assert!(
-            !session.use_represented_gameobject_goober_preamble_like_cpp(
-                gameobject_guid,
-                777,
-                Position::ZERO,
-                player_guid,
-                wow_entities::GooberUseSource {
-                    quest_id: 200,
-                    event_id: 55,
-                    linked_trap_entry: 999,
-                    ..Default::default()
-                },
-            )
+            !session
+                .use_represented_gameobject_goober_preamble_like_cpp(
+                    gameobject_guid,
+                    777,
+                    Position::ZERO,
+                    player_guid,
+                    wow_entities::GooberUseSource {
+                        quest_id: 200,
+                        event_id: 55,
+                        linked_trap_entry: 999,
+                        ..Default::default()
+                    },
+                )
+                .await
         );
         assert_eq!(
             session.represented_gameobject_use_effects,
@@ -38635,21 +43087,27 @@ mod tests {
                 quest_id: 200,
                 status: 1,
                 explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
                 objective_counts: vec![],
                 slot: 0,
             },
         );
-        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
-            gameobject_guid,
-            777,
-            Position::ZERO,
-            player_guid,
-            wow_entities::GooberUseSource {
-                quest_id: 200,
-                linked_trap_entry: 999,
-                ..Default::default()
-            },
-        ));
+        assert!(
+            session
+                .use_represented_gameobject_goober_preamble_like_cpp(
+                    gameobject_guid,
+                    777,
+                    Position::ZERO,
+                    player_guid,
+                    wow_entities::GooberUseSource {
+                        quest_id: 200,
+                        linked_trap_entry: 999,
+                        ..Default::default()
+                    },
+                )
+                .await
+        );
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![
@@ -38667,8 +43125,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn gameobject_use_goober_kill_credit_filters_group_reward_distance_like_cpp() {
+    #[tokio::test]
+    async fn gameobject_use_goober_kill_credit_filters_group_reward_distance_like_cpp() {
         let (mut session, _pkt_tx, _send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let near_member = ObjectGuid::create_player(1, 100);
@@ -38699,13 +43157,17 @@ mod tests {
         session.set_player_registry(player_registry);
         session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
 
-        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
-            gameobject_guid,
-            777,
-            gameobject_position,
-            player_guid,
-            wow_entities::GooberUseSource::default(),
-        ));
+        assert!(
+            session
+                .use_represented_gameobject_goober_preamble_like_cpp(
+                    gameobject_guid,
+                    777,
+                    gameobject_position,
+                    player_guid,
+                    wow_entities::GooberUseSource::default(),
+                )
+                .await
+        );
 
         assert_eq!(
             session.represented_gameobject_use_effects,

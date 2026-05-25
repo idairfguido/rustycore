@@ -4,7 +4,7 @@
 ///
 /// Used to collect bind parameters before executing a query, matching the
 /// C# `PreparedStatement.SetXxx(index, value)` pattern.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SqlParam {
     Null,
     Bool(bool),

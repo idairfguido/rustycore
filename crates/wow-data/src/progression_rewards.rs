@@ -8,6 +8,14 @@ use tracing::info;
 
 use crate::wdc4::Wdc4Reader;
 
+pub const QUEST_PACKAGE_FILTER_LOOT_SPECIALIZATION_LIKE_CPP: u8 = 0;
+pub const QUEST_PACKAGE_FILTER_CLASS_LIKE_CPP: u8 = 1;
+pub const QUEST_PACKAGE_FILTER_UNMATCHED_LIKE_CPP: u8 = 2;
+pub const QUEST_PACKAGE_FILTER_EVERYONE_LIKE_CPP: u8 = 3;
+pub const FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP: u16 = 0x0000_1000;
+pub const FACTION_TEMPLATE_FLAG_HOSTILE_BY_DEFAULT_LIKE_CPP: u16 = 0x0000_2000;
+pub const FACTION_MASK_PLAYER_LIKE_CPP: u8 = 0x01;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AchievementCategoryEntry {
     pub id: u32,
@@ -54,13 +62,46 @@ pub struct CurvePointEntry {
     pub order_index: u8,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FactionEntry {
     pub id: u32,
+    pub reputation_race_mask: [i64; 4],
     pub reputation_index: i16,
+    pub parent_faction_id: u16,
+    pub friendship_rep_id: u8,
+    pub flags: i32,
+    pub paragon_faction_id: u16,
+    pub renown_faction_id: i32,
+    pub renown_currency_id: i32,
+    pub reputation_class_mask: [i16; 4],
+    pub reputation_flags: [u16; 4],
+    pub reputation_base: [i32; 4],
+    pub reputation_max: [i32; 4],
+    pub parent_faction_mod: [f32; 2],
+    pub parent_faction_cap: [u8; 2],
 }
 
 impl FactionEntry {
+    pub const fn for_test_like_cpp(id: u32, reputation_index: i16) -> Self {
+        Self {
+            id,
+            reputation_race_mask: [0; 4],
+            reputation_index,
+            parent_faction_id: 0,
+            friendship_rep_id: 0,
+            flags: 0,
+            paragon_faction_id: 0,
+            renown_faction_id: 0,
+            renown_currency_id: 0,
+            reputation_class_mask: [0; 4],
+            reputation_flags: [0; 4],
+            reputation_base: [0; 4],
+            reputation_max: [0; 4],
+            parent_faction_mod: [0.0; 2],
+            parent_faction_cap: [0; 2],
+        }
+    }
+
     pub const fn can_have_reputation_like_cpp(&self) -> bool {
         self.reputation_index >= 0
     }
@@ -76,6 +117,57 @@ pub struct FactionTemplateEntry {
     pub enemy_group: u8,
     pub enemies: [u16; 8],
     pub friend: [u16; 8],
+}
+
+impl FactionTemplateEntry {
+    pub fn is_friendly_to_like_cpp(&self, entry: &Self) -> bool {
+        if self.id == entry.id {
+            return true;
+        }
+        if entry.faction != 0 {
+            if self.enemies.contains(&entry.faction) {
+                return false;
+            }
+            if self.friend.contains(&entry.faction) {
+                return true;
+            }
+        }
+        (self.friend_group & entry.faction_group) != 0
+            || (self.faction_group & entry.friend_group) != 0
+    }
+
+    pub fn is_hostile_to_like_cpp(&self, entry: &Self) -> bool {
+        if self.id == entry.id {
+            return false;
+        }
+        if entry.faction != 0 {
+            if self.enemies.contains(&entry.faction) {
+                return true;
+            }
+            if self.friend.contains(&entry.faction) {
+                return false;
+            }
+        }
+        (self.enemy_group & entry.faction_group) != 0
+    }
+
+    pub fn is_hostile_to_players_like_cpp(&self) -> bool {
+        (self.enemy_group & FACTION_MASK_PLAYER_LIKE_CPP) != 0
+    }
+
+    pub fn is_neutral_to_all_like_cpp(&self) -> bool {
+        self.enemies.iter().all(|enemy| *enemy == 0)
+            && self.enemy_group == 0
+            && self.friend_group == 0
+    }
+
+    pub fn is_contested_guard_faction_like_cpp(&self) -> bool {
+        (self.flags & FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP) != 0
+    }
+
+    pub fn is_hostile_by_default_like_cpp(&self) -> bool {
+        (self.flags & FACTION_TEMPLATE_FLAG_HOSTILE_BY_DEFAULT_LIKE_CPP) != 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,8 +459,36 @@ impl FactionStore {
     pub fn load(data_dir: &str, locale: &str) -> Result<Self> {
         load_store(data_dir, locale, "Faction.db2", |id, idx, r| FactionEntry {
             id,
+            reputation_race_mask: std::array::from_fn(|i| r.get_array_i64(idx, 0, i)),
             reputation_index: r.get_field_i16(idx, 4),
+            parent_faction_id: r.get_field_u16(idx, 5),
+            friendship_rep_id: r.get_field_u8(idx, 7),
+            flags: r.get_field_i32(idx, 8),
+            paragon_faction_id: r.get_field_u16(idx, 9),
+            renown_faction_id: r.get_field_i32(idx, 10),
+            renown_currency_id: r.get_field_i32(idx, 11),
+            reputation_class_mask: std::array::from_fn(|i| r.get_array_i16(idx, 12, i)),
+            reputation_flags: std::array::from_fn(|i| r.get_array_u16(idx, 13, i)),
+            reputation_base: std::array::from_fn(|i| r.get_array_i32(idx, 14, i)),
+            reputation_max: std::array::from_fn(|i| r.get_array_i32(idx, 15, i)),
+            parent_faction_mod: [r.get_field_f32(idx, 16), r.get_field_f32(idx, 17)],
+            parent_faction_cap: [r.get_field_u8(idx, 18), r.get_field_u8(idx, 19)],
         })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &FactionEntry> {
+        self.entries.values()
+    }
+
+    pub fn faction_team_list_like_cpp(&self, faction_id: u32) -> Vec<u32> {
+        let mut faction_ids = self
+            .entries
+            .values()
+            .filter(|entry| u32::from(entry.parent_faction_id) == faction_id)
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        faction_ids.sort_unstable();
+        faction_ids
     }
 }
 
@@ -402,6 +522,19 @@ impl FriendshipRepReactionStore {
                 reaction_threshold: r.get_field_u16(idx, 2),
             },
         )
+    }
+
+    pub fn reactions_for_friendship_rep_like_cpp(
+        &self,
+        friendship_rep_id: u8,
+    ) -> Vec<&FriendshipRepReactionEntry> {
+        let mut reactions: Vec<_> = self
+            .entries
+            .values()
+            .filter(|entry| entry.friendship_rep_id == friendship_rep_id)
+            .collect();
+        reactions.sort_by_key(|entry| entry.reaction_threshold);
+        reactions
     }
 }
 
@@ -461,6 +594,12 @@ impl ParagonReputationStore {
                 quest_id: r.get_field_i32(idx, 2),
             }
         })
+    }
+
+    pub fn get_by_faction_id_like_cpp(&self, faction_id: u32) -> Option<&ParagonReputationEntry> {
+        self.entries
+            .values()
+            .find(|entry| entry.faction_id == faction_id as i32)
     }
 }
 
@@ -523,6 +662,30 @@ impl QuestPackageItemStore {
                 item_quantity: r.get_field_u32(idx, 2),
                 display_type: r.get_field_u8(idx, 3),
             }
+        })
+    }
+
+    /// C++ `DB2Manager::GetQuestPackageItems`: package members whose
+    /// `DisplayType` is not `QUEST_PACKAGE_FILTER_UNMATCHED`.
+    pub fn quest_package_items_like_cpp(
+        &self,
+        package_id: u32,
+    ) -> impl Iterator<Item = &QuestPackageItemEntry> {
+        self.entries.values().filter(move |entry| {
+            u32::from(entry.package_id) == package_id
+                && entry.display_type != QUEST_PACKAGE_FILTER_UNMATCHED_LIKE_CPP
+        })
+    }
+
+    /// C++ `DB2Manager::GetQuestPackageItemsFallback`: package members whose
+    /// `DisplayType` is `QUEST_PACKAGE_FILTER_UNMATCHED`.
+    pub fn quest_package_items_fallback_like_cpp(
+        &self,
+        package_id: u32,
+    ) -> impl Iterator<Item = &QuestPackageItemEntry> {
+        self.entries.values().filter(move |entry| {
+            u32::from(entry.package_id) == package_id
+                && entry.display_type == QUEST_PACKAGE_FILTER_UNMATCHED_LIKE_CPP
         })
     }
 }
@@ -729,6 +892,25 @@ impl_from_entries!(ScalingStatValuesStore, ScalingStatValuesEntry);
 mod tests {
     use super::*;
 
+    fn faction_template_for_test(
+        id: u32,
+        faction: u16,
+        faction_group: u8,
+        friend_group: u8,
+        enemy_group: u8,
+    ) -> FactionTemplateEntry {
+        FactionTemplateEntry {
+            id,
+            faction,
+            flags: 0,
+            faction_group,
+            friend_group,
+            enemy_group,
+            enemies: [0; 8],
+            friend: [0; 8],
+        }
+    }
+
     #[test]
     fn reward_pack_currency_store_uses_cpp_parent_relationship() {
         let store = RewardPackXCurrencyTypeStore::from_entries([RewardPackXCurrencyTypeEntry {
@@ -739,6 +921,50 @@ mod tests {
         }]);
 
         assert_eq!(store.get(1).unwrap().reward_pack_id, 4);
+    }
+
+    #[test]
+    fn faction_template_friendly_relation_matches_cpp_precedence() {
+        let mut faction = faction_template_for_test(1, 100, 0x02, 0x04, 0);
+        let other = faction_template_for_test(2, 200, 0x04, 0, 0);
+
+        assert!(faction.is_friendly_to_like_cpp(&faction));
+        assert!(faction.is_friendly_to_like_cpp(&other));
+
+        faction.enemies[0] = 200;
+        faction.friend[0] = 200;
+        assert!(!faction.is_friendly_to_like_cpp(&other));
+    }
+
+    #[test]
+    fn faction_template_hostile_relation_matches_cpp_precedence() {
+        let mut faction = faction_template_for_test(1, 100, 0, 0, 0x04);
+        let other = faction_template_for_test(2, 200, 0x04, 0, 0);
+
+        assert!(!faction.is_hostile_to_like_cpp(&faction));
+        assert!(faction.is_hostile_to_like_cpp(&other));
+
+        faction.friend[0] = 200;
+        assert!(!faction.is_hostile_to_like_cpp(&other));
+    }
+
+    #[test]
+    fn faction_template_misc_helpers_match_cpp_flags_and_groups() {
+        let mut faction = faction_template_for_test(1, 100, 0, 0, FACTION_MASK_PLAYER_LIKE_CPP);
+        faction.flags = FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP
+            | FACTION_TEMPLATE_FLAG_HOSTILE_BY_DEFAULT_LIKE_CPP;
+
+        assert!(faction.is_hostile_to_players_like_cpp());
+        assert!(faction.is_contested_guard_faction_like_cpp());
+        assert!(faction.is_hostile_by_default_like_cpp());
+        assert!(!faction.is_neutral_to_all_like_cpp());
+
+        faction.enemy_group = 0;
+        faction.flags = 0;
+        assert!(faction.is_neutral_to_all_like_cpp());
+
+        faction.enemies[7] = 200;
+        assert!(!faction.is_neutral_to_all_like_cpp());
     }
 
     #[test]
@@ -783,6 +1009,45 @@ mod tests {
 
         assert_eq!(store.len(), 1);
         assert_eq!(store.get_quest_unique_bit_flag_like_cpp(12_345), 99);
+    }
+
+    #[test]
+    fn quest_package_items_split_primary_and_fallback_like_cpp() {
+        let store = QuestPackageItemStore::from_entries([
+            QuestPackageItemEntry {
+                id: 1,
+                package_id: 10,
+                item_id: 100,
+                item_quantity: 1,
+                display_type: QUEST_PACKAGE_FILTER_CLASS_LIKE_CPP,
+            },
+            QuestPackageItemEntry {
+                id: 2,
+                package_id: 10,
+                item_id: 200,
+                item_quantity: 1,
+                display_type: QUEST_PACKAGE_FILTER_UNMATCHED_LIKE_CPP,
+            },
+            QuestPackageItemEntry {
+                id: 3,
+                package_id: 11,
+                item_id: 300,
+                item_quantity: 1,
+                display_type: QUEST_PACKAGE_FILTER_EVERYONE_LIKE_CPP,
+            },
+        ]);
+
+        let primary: Vec<i32> = store
+            .quest_package_items_like_cpp(10)
+            .map(|entry| entry.item_id)
+            .collect();
+        let fallback: Vec<i32> = store
+            .quest_package_items_fallback_like_cpp(10)
+            .map(|entry| entry.item_id)
+            .collect();
+
+        assert_eq!(primary, vec![100]);
+        assert_eq!(fallback, vec![200]);
     }
 
     #[test]

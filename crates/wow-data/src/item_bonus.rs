@@ -348,6 +348,15 @@ impl ItemLimitCategoryConditionStore {
             },
         )
     }
+
+    pub fn conditions_for_parent_like_cpp(
+        &self,
+        parent_item_limit_category_id: u32,
+    ) -> impl Iterator<Item = &ItemLimitCategoryConditionEntry> {
+        self.entries.values().filter(move |entry| {
+            entry.parent_item_limit_category_id == parent_item_limit_category_id
+        })
+    }
 }
 
 impl ItemModifiedAppearanceExtraStore {

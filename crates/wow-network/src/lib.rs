@@ -13,7 +13,8 @@ pub mod session_mgr;
 pub mod world_socket;
 
 pub use accept::{
-    LootDropRatesLikeCpp, SessionResources, start_instance_listener, start_world_listener,
+    LootDropRatesLikeCpp, ReputationRatesLikeCpp, SessionResources, start_instance_listener,
+    start_world_listener,
 };
 pub use group_registry::{GroupInfo, GroupRegistry, PendingInvites};
 pub use player_registry::{

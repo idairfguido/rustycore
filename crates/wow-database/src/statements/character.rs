@@ -36,6 +36,15 @@ pub enum CharStatements {
     /// DELETE FROM characters WHERE guid = ?
     DEL_CHARACTER,
 
+    /// DELETE FROM character_reputation WHERE guid = ? AND faction = ?
+    DEL_CHAR_REPUTATION_BY_FACTION,
+
+    /// INSERT INTO character_reputation (guid, faction, standing, flags) VALUES (?, ?, ? , ?)
+    INS_CHAR_REPUTATION_BY_FACTION,
+
+    /// DELETE FROM character_reputation WHERE guid = ?
+    DEL_CHAR_REPUTATION,
+
     /// SELECT guid, account, name, race, class, gender, level, zone, map,
     /// position_x, position_y, position_z, orientation, playerFlags, at_login
     /// FROM characters WHERE guid = ?
@@ -72,6 +81,9 @@ pub enum CharStatements {
 
     /// SELECT spell, active, disabled FROM character_spell WHERE guid = ?
     SEL_CHARACTER_SPELL,
+
+    /// SELECT faction, standing, flags FROM character_reputation WHERE guid = ?
+    SEL_CHARACTER_REPUTATION,
 
     /// SELECT Currency, Quantity, WeeklyQuantity, TrackedQuantity,
     /// IncreasedCapQuantity, EarnedQuantity, Flags FROM character_currency
@@ -149,6 +161,22 @@ pub enum CharStatements {
     INS_GAME_EVENT_CONDITION_SAVE,
     /// DELETE FROM character_queststatus_seasonal WHERE event = ? AND completedTime < ?
     DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT,
+    /// DELETE FROM character_queststatus_daily WHERE guid = ?
+    DEL_CHARACTER_QUESTSTATUS_DAILY,
+    /// DELETE FROM character_queststatus_weekly WHERE guid = ?
+    DEL_CHARACTER_QUESTSTATUS_WEEKLY,
+    /// DELETE FROM character_queststatus_monthly WHERE guid = ?
+    DEL_CHARACTER_QUESTSTATUS_MONTHLY,
+    /// DELETE FROM character_queststatus_seasonal WHERE guid = ?
+    DEL_CHARACTER_QUESTSTATUS_SEASONAL,
+    /// INSERT INTO character_queststatus_daily (guid, quest, time) VALUES (?, ?, ?)
+    INS_CHARACTER_QUESTSTATUS_DAILY,
+    /// INSERT INTO character_queststatus_weekly (guid, quest) VALUES (?, ?)
+    INS_CHARACTER_QUESTSTATUS_WEEKLY,
+    /// INSERT INTO character_queststatus_monthly (guid, quest) VALUES (?, ?)
+    INS_CHARACTER_QUESTSTATUS_MONTHLY,
+    /// INSERT INTO character_queststatus_seasonal (guid, quest, event, completedTime) VALUES (?, ?, ?, ?)
+    INS_CHARACTER_QUESTSTATUS_SEASONAL,
     /// SELECT Id, Value FROM world_state_value
     SEL_WORLD_STATE_VALUES,
     /// REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)
@@ -157,10 +185,14 @@ pub enum CharStatements {
 
     // Quest status
     SEL_CHAR_QUEST_STATUS,
+    /// SELECT quest, objective, data FROM character_queststatus_objectives WHERE guid = ?
+    SEL_CHAR_QUEST_STATUS_OBJECTIVES,
     /// SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?
     SEL_CHAR_QUEST_STATUS_SEASONAL,
     INS_CHAR_QUEST_STATUS,
     DEL_CHAR_QUEST_STATUS,
+    DEL_CHAR_QUEST_STATUS_OBJECTIVES_BY_QUEST,
+    REP_CHAR_QUEST_STATUS_OBJECTIVES,
 
     /// UPDATE characters SET money = ? WHERE guid = ?
     UPD_CHAR_MONEY,
@@ -199,6 +231,9 @@ pub enum CharStatements {
 
     /// INSERT INTO character_inventory (guid, bag, slot, item) VALUES (?, 0, ?, ?)
     INS_CHAR_INVENTORY,
+
+    /// REPLACE INTO character_inventory (guid, bag, slot, item) VALUES (?, ?, ?, ?)
+    REP_CHAR_INVENTORY_ITEM,
 
     /// DELETE FROM item_instance WHERE guid = ?
     DEL_ITEM_INSTANCE,
@@ -286,6 +321,13 @@ impl StatementDef for CharStatements {
                  chrCustomizationChoiceID) VALUES (?,?,?)"
             }
             Self::DEL_CHARACTER => "DELETE FROM characters WHERE guid = ?",
+            Self::DEL_CHAR_REPUTATION_BY_FACTION => {
+                "DELETE FROM character_reputation WHERE guid = ? AND faction = ?"
+            }
+            Self::INS_CHAR_REPUTATION_BY_FACTION => {
+                "INSERT INTO character_reputation (guid, faction, standing, flags) VALUES (?, ?, ? , ?)"
+            }
+            Self::DEL_CHAR_REPUTATION => "DELETE FROM character_reputation WHERE guid = ?",
             Self::SEL_CHARACTER => {
                 "SELECT guid, account, name, race, class, gender, level, zone, map, \
                  position_x, position_y, position_z, orientation, playerFlags, at_login, \
@@ -318,6 +360,9 @@ impl StatementDef for CharStatements {
             }
             Self::SEL_CHARACTER_SPELL => {
                 "SELECT spell, active, disabled FROM character_spell WHERE guid = ?"
+            }
+            Self::SEL_CHARACTER_REPUTATION => {
+                "SELECT faction, standing, flags FROM character_reputation WHERE guid = ?"
             }
             Self::SEL_PLAYER_CURRENCY => {
                 "SELECT Currency, Quantity, WeeklyQuantity, TrackedQuantity, \
@@ -415,6 +460,30 @@ impl StatementDef for CharStatements {
             Self::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT => {
                 "DELETE FROM character_queststatus_seasonal WHERE event = ? AND completedTime < ?"
             }
+            Self::DEL_CHARACTER_QUESTSTATUS_DAILY => {
+                "DELETE FROM character_queststatus_daily WHERE guid = ?"
+            }
+            Self::DEL_CHARACTER_QUESTSTATUS_WEEKLY => {
+                "DELETE FROM character_queststatus_weekly WHERE guid = ?"
+            }
+            Self::DEL_CHARACTER_QUESTSTATUS_MONTHLY => {
+                "DELETE FROM character_queststatus_monthly WHERE guid = ?"
+            }
+            Self::DEL_CHARACTER_QUESTSTATUS_SEASONAL => {
+                "DELETE FROM character_queststatus_seasonal WHERE guid = ?"
+            }
+            Self::INS_CHARACTER_QUESTSTATUS_DAILY => {
+                "INSERT INTO character_queststatus_daily (guid, quest, time) VALUES (?, ?, ?)"
+            }
+            Self::INS_CHARACTER_QUESTSTATUS_WEEKLY => {
+                "INSERT INTO character_queststatus_weekly (guid, quest) VALUES (?, ?)"
+            }
+            Self::INS_CHARACTER_QUESTSTATUS_MONTHLY => {
+                "INSERT INTO character_queststatus_monthly (guid, quest) VALUES (?, ?)"
+            }
+            Self::INS_CHARACTER_QUESTSTATUS_SEASONAL => {
+                "INSERT INTO character_queststatus_seasonal (guid, quest, event, completedTime) VALUES (?, ?, ?, ?)"
+            }
             Self::SEL_WORLD_STATE_VALUES => "SELECT Id, Value FROM world_state_value",
             Self::REP_WORLD_STATE => "REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)",
             Self::UPD_CHAR_XP => "UPDATE characters SET xp = ? WHERE guid = ?",
@@ -453,6 +522,9 @@ impl StatementDef for CharStatements {
             }
             Self::INS_CHAR_INVENTORY => {
                 "INSERT INTO character_inventory (guid, bag, slot, item) VALUES (?, 0, ?, ?)"
+            }
+            Self::REP_CHAR_INVENTORY_ITEM => {
+                "REPLACE INTO character_inventory (guid, bag, slot, item) VALUES (?, ?, ?, ?)"
             }
             Self::DEL_ITEM_INSTANCE => "DELETE FROM item_instance WHERE guid = ?",
             Self::SEL_CHAR_BAG_CONTENTS => {
@@ -505,18 +577,25 @@ impl StatementDef for CharStatements {
             }
             Self::GENERATED_CPP { sql } => sql,
             Self::SEL_CHAR_QUEST_STATUS => {
-                "SELECT quest, status, explored FROM character_queststatus WHERE guid = ?"
+                "SELECT quest, status, explored, acceptTime, endTime FROM character_queststatus WHERE guid = ? AND status <> 0"
+            }
+            Self::SEL_CHAR_QUEST_STATUS_OBJECTIVES => {
+                "SELECT quest, objective, data FROM character_queststatus_objectives WHERE guid = ?"
             }
             Self::SEL_CHAR_QUEST_STATUS_SEASONAL => {
                 "SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?"
             }
             Self::INS_CHAR_QUEST_STATUS => {
-                "INSERT INTO character_queststatus (guid, quest, status, explored, acceptTime, endTime) \
-                 VALUES (?, ?, ?, 0, UNIX_TIMESTAMP(), 0) \
-                 ON DUPLICATE KEY UPDATE status = ?, explored = ?"
+                "REPLACE INTO character_queststatus (guid, quest, status, explored, acceptTime, endTime) VALUES (?, ?, ?, ?, ?, ?)"
             }
             Self::DEL_CHAR_QUEST_STATUS => {
                 "DELETE FROM character_queststatus WHERE guid = ? AND quest = ?"
+            }
+            Self::DEL_CHAR_QUEST_STATUS_OBJECTIVES_BY_QUEST => {
+                "DELETE FROM character_queststatus_objectives WHERE guid = ? AND quest = ?"
+            }
+            Self::REP_CHAR_QUEST_STATUS_OBJECTIVES => {
+                "REPLACE INTO character_queststatus_objectives (guid, quest, objective, data) VALUES (?, ?, ?, ?)"
             }
         }
     }
@@ -629,6 +708,18 @@ mod tests {
         assert!(!CharStatements::INS_CHARACTER.sql().is_empty());
         assert!(!CharStatements::INS_CHAR_CUSTOMIZATION.sql().is_empty());
         assert!(!CharStatements::DEL_CHARACTER.sql().is_empty());
+        assert!(!CharStatements::SEL_CHARACTER_REPUTATION.sql().is_empty());
+        assert!(
+            !CharStatements::DEL_CHAR_REPUTATION_BY_FACTION
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::INS_CHAR_REPUTATION_BY_FACTION
+                .sql()
+                .is_empty()
+        );
+        assert!(!CharStatements::DEL_CHAR_REPUTATION.sql().is_empty());
         assert!(!CharStatements::SEL_CHARACTER.sql().is_empty());
         assert!(!CharStatements::UPD_CHAR_ONLINE.sql().is_empty());
         assert!(!CharStatements::UPD_CHAR_OFFLINE.sql().is_empty());
@@ -670,6 +761,46 @@ mod tests {
         );
         assert!(
             !CharStatements::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_CHARACTER_QUESTSTATUS_DAILY
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_CHARACTER_QUESTSTATUS_WEEKLY
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_CHARACTER_QUESTSTATUS_MONTHLY
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_CHARACTER_QUESTSTATUS_SEASONAL
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::INS_CHARACTER_QUESTSTATUS_DAILY
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::INS_CHARACTER_QUESTSTATUS_WEEKLY
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::INS_CHARACTER_QUESTSTATUS_MONTHLY
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::INS_CHARACTER_QUESTSTATUS_SEASONAL
                 .sql()
                 .is_empty()
         );
@@ -719,6 +850,62 @@ mod tests {
     }
 
     #[test]
+    fn character_reputation_statements_match_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::SEL_CHARACTER_REPUTATION.sql(),
+            "SELECT faction, standing, flags FROM character_reputation WHERE guid = ?"
+        );
+        assert_eq!(
+            CharStatements::DEL_CHAR_REPUTATION_BY_FACTION.sql(),
+            "DELETE FROM character_reputation WHERE guid = ? AND faction = ?"
+        );
+        assert_eq!(
+            CharStatements::INS_CHAR_REPUTATION_BY_FACTION.sql(),
+            "INSERT INTO character_reputation (guid, faction, standing, flags) VALUES (?, ?, ? , ?)"
+        );
+        assert_eq!(
+            CharStatements::DEL_CHAR_REPUTATION.sql(),
+            "DELETE FROM character_reputation WHERE guid = ?"
+        );
+    }
+
+    #[test]
+    fn quest_reward_lockout_status_save_statements_match_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_DAILY.sql(),
+            "DELETE FROM character_queststatus_daily WHERE guid = ?"
+        );
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_WEEKLY.sql(),
+            "DELETE FROM character_queststatus_weekly WHERE guid = ?"
+        );
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_MONTHLY.sql(),
+            "DELETE FROM character_queststatus_monthly WHERE guid = ?"
+        );
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_SEASONAL.sql(),
+            "DELETE FROM character_queststatus_seasonal WHERE guid = ?"
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_DAILY.sql(),
+            "INSERT INTO character_queststatus_daily (guid, quest, time) VALUES (?, ?, ?)"
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_WEEKLY.sql(),
+            "INSERT INTO character_queststatus_weekly (guid, quest) VALUES (?, ?)"
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_MONTHLY.sql(),
+            "INSERT INTO character_queststatus_monthly (guid, quest) VALUES (?, ?)"
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_SEASONAL.sql(),
+            "INSERT INTO character_queststatus_seasonal (guid, quest, event, completedTime) VALUES (?, ?, ?, ?)"
+        );
+    }
+
+    #[test]
     fn world_state_value_statements_match_cpp_sql_exactly() {
         assert_eq!(
             CharStatements::SEL_WORLD_STATE_VALUES.sql(),
@@ -743,6 +930,50 @@ mod tests {
             CharStatements::SEL_CHAR_QUEST_STATUS_SEASONAL.sql(),
             "SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?"
         );
+    }
+
+    #[test]
+    fn quest_status_load_statement_matches_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::SEL_CHAR_QUEST_STATUS.sql(),
+            "SELECT quest, status, explored, acceptTime, endTime FROM character_queststatus WHERE guid = ? AND status <> 0"
+        );
+        assert_eq!(
+            CharStatements::SEL_CHAR_QUEST_STATUS_OBJECTIVES.sql(),
+            "SELECT quest, objective, data FROM character_queststatus_objectives WHERE guid = ?"
+        );
+    }
+
+    #[test]
+    fn quest_status_objective_save_statements_match_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::DEL_CHAR_QUEST_STATUS_OBJECTIVES_BY_QUEST.sql(),
+            "DELETE FROM character_queststatus_objectives WHERE guid = ? AND quest = ?"
+        );
+        assert_eq!(
+            CharStatements::REP_CHAR_QUEST_STATUS_OBJECTIVES.sql(),
+            "REPLACE INTO character_queststatus_objectives (guid, quest, objective, data) VALUES (?, ?, ?, ?)"
+        );
+    }
+
+    #[test]
+    fn quest_status_save_statement_matches_cpp_replace_sql_exactly() {
+        let sql = CharStatements::INS_CHAR_QUEST_STATUS.sql();
+        assert_eq!(
+            sql,
+            "REPLACE INTO character_queststatus (guid, quest, status, explored, acceptTime, endTime) VALUES (?, ?, ?, ?, ?, ?)"
+        );
+        assert_eq!(sql.matches('?').count(), 6);
+    }
+
+    #[test]
+    fn inventory_item_replace_statement_matches_cpp_sql_exactly() {
+        let sql = CharStatements::REP_CHAR_INVENTORY_ITEM.sql();
+        assert_eq!(
+            sql,
+            "REPLACE INTO character_inventory (guid, bag, slot, item) VALUES (?, ?, ?, ?)"
+        );
+        assert_eq!(sql.matches('?').count(), 4);
     }
 
     #[test]
@@ -864,6 +1095,62 @@ mod tests {
                 .matches('?')
                 .count(),
             8
+        );
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_DAILY
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_WEEKLY
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_MONTHLY
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
+        assert_eq!(
+            CharStatements::DEL_CHARACTER_QUESTSTATUS_SEASONAL
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_DAILY
+                .sql()
+                .matches('?')
+                .count(),
+            3
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_WEEKLY
+                .sql()
+                .matches('?')
+                .count(),
+            2
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_MONTHLY
+                .sql()
+                .matches('?')
+                .count(),
+            2
+        );
+        assert_eq!(
+            CharStatements::INS_CHARACTER_QUESTSTATUS_SEASONAL
+                .sql()
+                .matches('?')
+                .count(),
+            4
         );
         assert_eq!(
             CharStatements::SEL_CHAR_EQUIPMENT

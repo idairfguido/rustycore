@@ -96,6 +96,7 @@ pub enum ItemPushResultDisplayType {
     Hidden = 0,
     Normal = 1,
     EncounterLoot = 2,
+    QuestUpdateAddItem = 3,
 }
 
 impl Default for ItemPushResultDisplayType {

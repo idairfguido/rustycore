@@ -1066,28 +1066,7 @@ impl ServerPacket for UpdateActionButtons {
     }
 }
 
-// ── InitializeFactions (SMSG 0x2724) ────────────────────────────────
-
-/// Faction reputation standings. 1000 factions, all neutral for fresh chars.
-/// C# interleaves flags+standings per faction, then 1000 bonus bits.
-pub struct InitializeFactions;
-
-impl ServerPacket for InitializeFactions {
-    const OPCODE: ServerOpcodes = ServerOpcodes::InitializeFactions;
-
-    fn write(&self, pkt: &mut WorldPacket) {
-        // Interleaved: [flags, standing] per faction
-        for _ in 0..1000 {
-            pkt.write_uint16(0); // FactionFlags
-            pkt.write_int32(0); // FactionStandings
-        }
-        // Then 1000 bits for FactionHasBonus
-        for _ in 0..1000 {
-            pkt.write_bit(false);
-        }
-        pkt.flush_bits();
-    }
-}
+pub use super::reputation::InitializeFactions;
 
 // ── BindPointUpdate (SMSG 0x257d) ───────────────────────────────────
 
@@ -3045,7 +3024,7 @@ mod tests {
 
     #[test]
     fn initialize_factions_empty() {
-        let pkt = InitializeFactions;
+        let pkt = InitializeFactions::default();
         let bytes = pkt.to_bytes();
         // opcode(2) + 1000*(uint16+int32) + ceil(1000/8) = 2 + 6000 + 125 = 6127
         assert_eq!(bytes.len(), 6127);

@@ -36,8 +36,8 @@ use wow_network::session_mgr::SessionManager;
 use wow_network::world_socket::{AccountInfo, AccountLookup};
 use wow_network::{
     GameEventQuestCompleteCommandLikeCpp, GameEventQuestCompleteResponseLikeCpp, GroupRegistry,
-    LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, ResetSeasonalQuestStatusCommand,
-    SessionCommand, SessionResources,
+    LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, ReputationRatesLikeCpp,
+    ResetSeasonalQuestStatusCommand, SessionCommand, SessionResources,
 };
 use wow_packet::{
     ServerPacket,
@@ -439,6 +439,26 @@ async fn main() -> Result<()> {
         item_price_base_store.len()
     );
 
+    let item_limit_category_store = Arc::new(
+        wow_data::ItemLimitCategoryStore::load(&data_dir, &locale).context(
+            "Failed to load ItemLimitCategory.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
+    info!(
+        "Loaded {} item limit categories from ItemLimitCategory.db2",
+        item_limit_category_store.len()
+    );
+
+    let item_limit_category_condition_store = Arc::new(
+        wow_data::ItemLimitCategoryConditionStore::load(&data_dir, &locale).context(
+            "Failed to load ItemLimitCategoryCondition.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
+    info!(
+        "Loaded {} item limit category conditions from ItemLimitCategoryCondition.db2",
+        item_limit_category_condition_store.len()
+    );
+
     // Load ChrSpecialization.db2 for C++ loot-specialization validation.
     let chr_specialization_store = Arc::new(
         wow_data::ChrSpecializationStore::load(&data_dir, &locale).context(
@@ -797,6 +817,14 @@ async fn main() -> Result<()> {
     info!(
         "Loaded {} map difficulty conditions from MapDifficultyXCondition.db2",
         map_difficulty_x_condition_store.len()
+    );
+    let lfg_dungeons_store = Arc::new(
+        wow_data::LfgDungeonsStore::load(&data_dir, &locale)
+            .context("Failed to load LFGDungeons.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!(
+        "Loaded {} LFG dungeons from LFGDungeons.db2",
+        lfg_dungeons_store.len()
     );
 
     let (canonical_spawn_metadata, canonical_spawn_report) =
@@ -1309,6 +1337,71 @@ async fn main() -> Result<()> {
         wow_data::progression_rewards::QuestV2Store::load(&data_dir, &locale)
             .context("Failed to load QuestV2.db2 — check DataDir and DBC.Locale config")?,
     );
+    let quest_package_item_store = Arc::new(
+        wow_data::progression_rewards::QuestPackageItemStore::load(&data_dir, &locale)
+            .context("Failed to load QuestPackageItem.db2 — check DataDir and DBC.Locale config")?,
+    );
+    let quest_faction_reward_store = Arc::new(
+        wow_data::progression_rewards::QuestFactionRewardStore::load(&data_dir, &locale).context(
+            "Failed to load QuestFactionReward.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
+    let progression_faction_store = Arc::new(
+        wow_data::progression_rewards::FactionStore::load(&data_dir, &locale).context(
+            "Failed to load Faction.db2 progression store — check DataDir and DBC.Locale config",
+        )?,
+    );
+    let friendship_rep_reaction_store = Arc::new(
+        wow_data::progression_rewards::FriendshipRepReactionStore::load(&data_dir, &locale)
+            .context(
+                "Failed to load FriendshipRepReaction.db2 — check DataDir and DBC.Locale config",
+            )?,
+    );
+    let paragon_reputation_store = Arc::new(
+        wow_data::progression_rewards::ParagonReputationStore::load(&data_dir, &locale).context(
+            "Failed to load ParagonReputation.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
+    let (reputation_reward_rate_store, reputation_reward_rate_report) =
+        wow_data::reputation::ReputationRewardRateStoreLikeCpp::load_like_cpp(
+            &world_db,
+            &progression_faction_store,
+        )
+        .await
+        .context("Failed to load reputation_reward_rate")?;
+    let reputation_reward_rate_store = Arc::new(reputation_reward_rate_store);
+    tracing::info!(
+        loaded = reputation_reward_rate_store.len(),
+        skipped = reputation_reward_rate_report.skipped.len(),
+        "Loaded reputation_reward_rate like C++"
+    );
+    let (creature_onkill_reputation_store, creature_onkill_reputation_report) =
+        wow_data::reputation::CreatureOnKillReputationStoreLikeCpp::load_like_cpp(
+            &world_db,
+            &creature_template_lifecycle_store,
+            &progression_faction_store,
+        )
+        .await
+        .context("Failed to load creature_onkill_reputation")?;
+    let creature_onkill_reputation_store = Arc::new(creature_onkill_reputation_store);
+    tracing::info!(
+        loaded = creature_onkill_reputation_store.len(),
+        skipped = creature_onkill_reputation_report.skipped.len(),
+        "Loaded creature_onkill_reputation like C++"
+    );
+    let (reputation_spillover_template_store, reputation_spillover_template_report) =
+        wow_data::reputation::RepSpilloverTemplateStoreLikeCpp::load_like_cpp(
+            &world_db,
+            &progression_faction_store,
+        )
+        .await
+        .context("Failed to load reputation_spillover_template")?;
+    let reputation_spillover_template_store = Arc::new(reputation_spillover_template_store);
+    tracing::info!(
+        loaded = reputation_spillover_template_store.len(),
+        skipped = reputation_spillover_template_report.skipped.len(),
+        "Loaded reputation_spillover_template like C++"
+    );
 
     // Get realm ID and load build-specific auth seed
     let realm_id: u16 = wow_config::get_value("RealmID").unwrap_or(1);
@@ -1756,6 +1849,8 @@ async fn main() -> Result<()> {
         item_appearance_store: Some(Arc::clone(&item_appearance_store)),
         item_modified_appearance_store: Some(Arc::clone(&item_modified_appearance_store)),
         item_price_base_store: Some(Arc::clone(&item_price_base_store)),
+        item_limit_category_store: Some(Arc::clone(&item_limit_category_store)),
+        item_limit_category_condition_store: Some(Arc::clone(&item_limit_category_condition_store)),
         player_stats: Some(Arc::clone(&player_stats)),
         item_stats_store: Some(Arc::clone(&item_stats_store)),
         item_random_suffix_store: Some(Arc::clone(&item_random_suffix_store)),
@@ -1788,6 +1883,7 @@ async fn main() -> Result<()> {
         map_store: Some(Arc::clone(&map_store)),
         map_difficulty_store: Some(Arc::clone(&map_difficulty_store)),
         map_difficulty_x_condition_store: Some(Arc::clone(&map_difficulty_x_condition_store)),
+        lfg_dungeons_store: Some(Arc::clone(&lfg_dungeons_store)),
         creature_template_mount_store: Some(Arc::clone(&creature_template_mount_store)),
         creature_display_info_store: Some(Arc::clone(&creature_display_info_store)),
         gameobject_display_info_store: Some(Arc::clone(&gameobject_display_info_store)),
@@ -1806,12 +1902,21 @@ async fn main() -> Result<()> {
         quest_store: Some(Arc::clone(&quest_store)),
         quest_xp_store: Some(Arc::clone(&quest_xp_store)),
         quest_v2_store: Some(Arc::clone(&quest_v2_store)),
+        quest_package_item_store: Some(Arc::clone(&quest_package_item_store)),
+        quest_faction_reward_store: Some(Arc::clone(&quest_faction_reward_store)),
+        progression_faction_store: Some(Arc::clone(&progression_faction_store)),
+        friendship_rep_reaction_store: Some(Arc::clone(&friendship_rep_reaction_store)),
+        paragon_reputation_store: Some(Arc::clone(&paragon_reputation_store)),
+        reputation_reward_rate_store: Some(Arc::clone(&reputation_reward_rate_store)),
+        creature_onkill_reputation_store: Some(Arc::clone(&creature_onkill_reputation_store)),
+        reputation_spillover_template_store: Some(Arc::clone(&reputation_spillover_template_store)),
         player_xp_table: Some(Arc::clone(&player_xp_table)),
         player_registry: Some(Arc::clone(&player_registry)),
         game_event_quest_complete_tx: Some(game_event_quest_complete_tx),
         group_registry: Some(Arc::clone(&group_registry)),
         pending_invites: Some(Arc::clone(&pending_invites)),
         loot_drop_rates: loot_drop_rates_like_cpp(&world_configs),
+        reputation_rates: reputation_rates_like_cpp(&world_configs),
         enable_ae_loot: world_config_bool(&world_configs, "CONFIG_ENABLE_AE_LOOT", false),
         realm_id,
         realm_external_address,
@@ -2117,6 +2222,24 @@ fn loot_drop_rates_like_cpp(configs: &WorldConfigSet) -> LootDropRatesLikeCpp {
         item_referenced: world_config_f32(configs, "RATE_DROP_ITEM_REFERENCED", 1.0),
         item_referenced_amount: world_config_f32(configs, "RATE_DROP_ITEM_REFERENCED_AMOUNT", 1.0),
         money: world_config_f32(configs, "RATE_DROP_MONEY", 1.0),
+    }
+}
+
+fn reputation_rates_like_cpp(configs: &WorldConfigSet) -> ReputationRatesLikeCpp {
+    ReputationRatesLikeCpp {
+        gain: world_config_f32(configs, "RATE_REPUTATION_GAIN", 1.0),
+        low_level_kill: world_config_f32(configs, "RATE_REPUTATION_LOWLEVEL_KILL", 1.0),
+        low_level_quest: world_config_f32(configs, "RATE_REPUTATION_LOWLEVEL_QUEST", 1.0),
+        recruit_a_friend_bonus: world_config_f32(
+            configs,
+            "RATE_REPUTATION_RECRUIT_A_FRIEND_BONUS",
+            0.1,
+        ),
+        recruit_a_friend_distance: world_config_f32(
+            configs,
+            "CONFIG_MAX_RECRUIT_A_FRIEND_DISTANCE",
+            100.0,
+        ),
     }
 }
 
@@ -6396,6 +6519,7 @@ async fn create_session(
         session.set_login_db(Arc::clone(db));
     }
     session.set_battlenet_account_id(account.battlenet_account_id);
+    session.set_recruiter_id_like_cpp(account.recruiter);
     if let Some(ref generator) = resources.guid_generator {
         session.set_guid_generator(Arc::clone(generator));
     }
@@ -6431,6 +6555,12 @@ async fn create_session(
     }
     if let Some(ref store) = resources.item_price_base_store {
         session.set_item_price_base_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.item_limit_category_store {
+        session.set_item_limit_category_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.item_limit_category_condition_store {
+        session.set_item_limit_category_condition_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.player_stats {
         session.set_player_stats(Arc::clone(store));
@@ -6522,6 +6652,9 @@ async fn create_session(
     if let Some(ref store) = resources.map_difficulty_x_condition_store {
         session.set_map_difficulty_x_condition_store(Arc::clone(store));
     }
+    if let Some(ref store) = resources.lfg_dungeons_store {
+        session.set_lfg_dungeons_store(Arc::clone(store));
+    }
     if let Some(ref store) = resources.creature_template_mount_store {
         session.set_creature_template_mount_store(Arc::clone(store));
     }
@@ -6576,6 +6709,30 @@ async fn create_session(
     if let Some(ref store) = resources.quest_v2_store {
         session.set_quest_v2_store(Arc::clone(store));
     }
+    if let Some(ref store) = resources.quest_package_item_store {
+        session.set_quest_package_item_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.quest_faction_reward_store {
+        session.set_quest_faction_reward_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.progression_faction_store {
+        session.set_faction_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.friendship_rep_reaction_store {
+        session.set_friendship_rep_reaction_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.paragon_reputation_store {
+        session.set_paragon_reputation_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.reputation_reward_rate_store {
+        session.set_reputation_reward_rate_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.creature_onkill_reputation_store {
+        session.set_creature_onkill_reputation_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.reputation_spillover_template_store {
+        session.set_reputation_spillover_template_store(Arc::clone(store));
+    }
     if let Some(ref table) = resources.player_xp_table {
         session.set_player_xp_table(Arc::clone(table));
     }
@@ -6586,6 +6743,7 @@ async fn create_session(
         session.set_game_event_quest_complete_sender_like_cpp(sender.clone());
     }
     session.set_loot_drop_rates_like_cpp(resources.loot_drop_rates);
+    session.set_reputation_rates_like_cpp(resources.reputation_rates);
     session.set_enable_ae_loot_like_cpp(resources.enable_ae_loot);
     session.set_mmap_runtime_config_like_cpp(mmap_runtime_config);
     if let Some(pathfinder) = mmap_pathfinder {
@@ -6773,8 +6931,8 @@ mod tests {
         loot_drop_rates_like_cpp, materialize_game_event_quest_complete_db_bridge_like_cpp,
         materialize_game_event_world_event_state_db_bridge_like_cpp, mmap_runtime_config_like_cpp,
         persisted_respawn_info_from_row_like_cpp, queue_respawn_db_delete_like_cpp,
-        queue_respawn_db_save_like_cpp, spawn_store_loader, world_config_bool, world_config_u8,
-        world_config_u16,
+        queue_respawn_db_save_like_cpp, reputation_rates_like_cpp, spawn_store_loader,
+        world_config_bool, world_config_u8, world_config_u16,
     };
     use std::collections::{BTreeMap, HashSet};
     use std::env;
@@ -6827,6 +6985,7 @@ mod tests {
             party_member_phase_states: Default::default(),
             player_name: player_name.to_string(),
             account_id: 1,
+            recruiter_id: 0,
             race: 1,
             class: 1,
             sex: 0,
@@ -8894,6 +9053,29 @@ Rate.Drop.Money = 6
         assert_eq!(rates.item_referenced, 4.0);
         assert_eq!(rates.item_referenced_amount, 2.0);
         assert_eq!(rates.money, 6.0);
+    }
+
+    #[test]
+    fn reputation_rates_use_cpp_world_config_keys() {
+        let _guard = TEST_LOCK.lock().expect("test lock poisoned");
+        wow_config::load_config_from_str(
+            r#"
+Rate.Reputation.Gain = 2
+Rate.Reputation.LowLevel.Kill = 0.25
+Rate.Reputation.LowLevel.Quest = 0.5
+Rate.Reputation.RecruitAFriendBonus = 0.2
+MaxRecruitAFriendBonusDistance = 45
+"#,
+        )
+        .expect("config should load");
+
+        let configs = wow_config::load_world_config_values();
+        let rates = reputation_rates_like_cpp(&configs);
+        assert_eq!(rates.gain, 2.0);
+        assert_eq!(rates.low_level_kill, 0.25);
+        assert_eq!(rates.low_level_quest, 0.5);
+        assert_eq!(rates.recruit_a_friend_bonus, 0.2);
+        assert_eq!(rates.recruit_a_friend_distance, 45.0);
     }
 
     #[test]
@@ -11501,6 +11683,9 @@ mmap.enablePathFinding = 0
                 active_loot_rolls: Vec::new(),
                 pass_on_group_loot: false,
                 enchanting_skill: 0,
+                is_alive: true,
+                active_expansion: 2,
+                pending_quest_sharing: None,
                 known_spells: Vec::new(),
                 active_quest_statuses: Default::default(),
                 active_quest_objective_counts: Default::default(),
@@ -11512,6 +11697,7 @@ mmap.enablePathFinding = 0
                 party_member_phase_states: Default::default(),
                 player_name: "SeasonalTester".to_string(),
                 account_id: 1,
+                recruiter_id: 0,
                 race: 1,
                 class: 1,
                 sex: 0,

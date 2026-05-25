@@ -685,6 +685,7 @@ pub const ACTIVE_PLAYER_DATA_BUYBACK_PRICE_FIRST_BIT: usize = 550;
 pub const ACTIVE_PLAYER_DATA_BUYBACK_TIMESTAMP_FIRST_BIT: usize = 562;
 pub const ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT: usize = 636;
 pub const ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT: usize = 637;
+pub const ACTIVE_PLAYER_DATA_WATCHED_FACTION_INDEX_BIT: usize = 92;
 pub const QUESTS_COMPLETED_BITS_SIZE: usize = 875;
 pub const QUESTS_COMPLETED_BITS_PER_BLOCK: u32 = 64;
 pub const PLAYER_SLOT_END: usize = 141;
@@ -2020,6 +2021,7 @@ impl SendNewItemArgs {
 pub enum SendNewItemDisplayText {
     Normal,
     EncounterLoot,
+    QuestUpdateAddItem,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2727,6 +2729,7 @@ pub struct ActivePlayerDataValues {
     pub xp: i32,
     pub next_level_xp: i32,
     pub character_points: i32,
+    pub watched_faction_index: i32,
     pub num_backpack_slots: u8,
     pub inv_slots: [ObjectGuid; PLAYER_SLOT_END],
     pub buyback_price: [u32; BUYBACK_SLOT_COUNT],
@@ -2742,6 +2745,7 @@ impl Default for ActivePlayerDataValues {
             xp: 0,
             next_level_xp: 0,
             character_points: 0,
+            watched_faction_index: -1,
             num_backpack_slots: 0,
             inv_slots: [ObjectGuid::EMPTY; PLAYER_SLOT_END],
             buyback_price: [0; BUYBACK_SLOT_COUNT],
@@ -3354,6 +3358,14 @@ impl Player {
             ACTIVE_PLAYER_DATA_CHARACTER_POINTS_BIT,
             i32::from(points),
             |data| &mut data.character_points,
+        );
+    }
+
+    pub fn set_watched_faction_index_like_cpp(&mut self, index: i32) {
+        self.set_active_i32(
+            ACTIVE_PLAYER_DATA_WATCHED_FACTION_INDEX_BIT,
+            index,
+            |data| &mut data.watched_faction_index,
         );
     }
 
@@ -11899,12 +11911,14 @@ mod tests {
         player.set_xp(123);
         player.set_next_level_xp(456);
         player.set_free_primary_professions(2);
+        player.set_watched_faction_index_like_cpp(42);
         player.set_inventory_slot_count(16);
         player.set_inv_slot(3, ObjectGuid::new(4, 5));
 
         assert_eq!(player.active_data().xp, 123);
         assert_eq!(player.active_data().next_level_xp, 456);
         assert_eq!(player.active_data().character_points, 2);
+        assert_eq!(player.active_data().watched_faction_index, 42);
         assert_eq!(player.active_data().num_backpack_slots, 16);
         assert_eq!(player.active_data().inv_slots[3], ObjectGuid::new(4, 5));
         assert_eq!(player.active_data().buyback_price, [0; BUYBACK_SLOT_COUNT]);
@@ -11931,6 +11945,11 @@ mod tests {
             player
                 .active_player_data_changes_mask()
                 .is_set(ACTIVE_PLAYER_DATA_CHARACTER_POINTS_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_WATCHED_FACTION_INDEX_BIT)
         );
         assert!(
             player

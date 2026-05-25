@@ -75,7 +75,8 @@ use wow_packet::{ClientPacket, ServerPacket};
 
 use crate::session::{
     InventoryItem, RepresentedGameObjectSpellCaster, RepresentedGameObjectUseEffect,
-    RepresentedLootRollState, RepresentedLootRollVote, WorldSession,
+    RepresentedLootRollState, RepresentedLootRollVote,
+    RepresentedQuestObjectiveProgressEventLikeCpp, WorldSession,
 };
 
 const LOOT_METHOD_MASTER_LIKE_CPP: u8 = 2;
@@ -1057,11 +1058,20 @@ impl WorldSession {
             }
         }
 
-        self.set_player_gold_like_cpp(
-            self.player_gold_like_cpp()
-                .saturating_add(player_money_delta),
-        );
+        let old_money = self.player_gold_like_cpp();
+        let new_money = old_money.saturating_add(player_money_delta);
+        if player_money_delta != 0 {
+            self.enqueue_represented_quest_objective_progress_like_cpp(
+                RepresentedQuestObjectiveProgressEventLikeCpp::MoneyChanged {
+                    old_money,
+                    new_money,
+                },
+            );
+        }
+        self.set_player_gold_like_cpp(new_money);
         self.save_player_gold().await;
+        self.drain_represented_quest_objective_progress_like_cpp()
+            .await;
 
         for (loot_guid, _, _) in &money_by_loot {
             if loot_guid.is_item() {
@@ -5586,6 +5596,7 @@ impl WorldSession {
                     owner_guid: player_guid,
                     contained_in: player_guid,
                     stack_count: stack.count,
+                    dynamic_flags: 0,
                     durability: stack.max_durability,
                     max_durability: stack.max_durability,
                     random_properties_seed: stack.random_properties_seed,
@@ -6840,7 +6851,9 @@ mod tests {
         ItemQuality, TypeId, TypeMask,
     };
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
-    use wow_data::quest::{QuestObjective, QuestStore, QuestTemplate};
+    use wow_data::quest::{
+        QUEST_REWARD_REPUTATIONS_COUNT, QuestObjective, QuestStore, QuestTemplate,
+    };
     use wow_data::{
         AreaTableEntry, AreaTableStore, ChrSpecializationEntry, ChrSpecializationStore,
         ItemDisenchantLootEntry, ItemDisenchantLootStore, ItemRandomEnchantmentTemplateEntry,
@@ -7614,6 +7627,7 @@ mod tests {
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
+            recruiter_id: 0,
             race: 1,
             class: 1,
             sex: 0,
@@ -7648,6 +7662,7 @@ mod tests {
             quest_type: 0,
             quest_level: 1,
             quest_max_scaling_level: 0,
+            quest_package_id: 0,
             min_level: 1,
             quest_sort_id: 0,
             quest_info_id: 0,
@@ -7661,9 +7676,21 @@ mod tests {
             reward_display_spell: [0; 3],
             reward_spell: 0,
             reward_honor: 0,
+            reward_title_id: 0,
+            reward_skill_line_id: 0,
+            reward_skill_points: 0,
+            reward_mail_template_id: 0,
+            reward_mail_delay_secs: 0,
+            reward_mail_sender_entry: 0,
+            reward_faction_ids: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_values: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_overrides: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_cap_in: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_flags: 0,
             source_item_id: 0,
             source_item_count: 0,
             source_spell_id: 0,
+            limit_time_secs: 0,
             expansion: 0,
             flags: 0,
             flags_ex: 0,
@@ -7672,6 +7699,8 @@ mod tests {
             event_id_for_quest: 0,
             reward_items: [0; 4],
             reward_amounts: [0; 4],
+            reward_currencies: [0; 4],
+            reward_currency_amounts: [0; 4],
             item_drop: [0; 4],
             item_drop_quantity: [0; 4],
             log_title: String::new(),
@@ -7694,6 +7723,7 @@ mod tests {
             required_max_rep_faction: 0,
             required_max_rep_value: 0,
             reward_choice_items: [(0, 0); 6],
+            reward_choice_item_types: [0; 6],
         }
     }
 
@@ -8176,6 +8206,7 @@ mod tests {
                 aura_interrupt_flags2: 0,
                 represented_effect: None,
                 represented_amount: 0,
+                represented_misc_value: None,
                 represented_multiplier: 1.0,
                 applied_at: std::time::Instant::now(),
             },
@@ -11745,6 +11776,78 @@ mod tests {
         assert_eq!(session.loot_table.get(&owner_two).unwrap().coins, 0);
         assert!(session.active_loot_view_owners.contains(&owner_one));
         assert!(session.active_loot_view_owners.contains(&owner_two));
+    }
+
+    #[tokio::test]
+    async fn loot_money_gain_completes_money_tracking_event_objective_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send_capacity(4);
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_creature_guid(19_029);
+        let quest_id = 12_530;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: 8, // C++ QUEST_OBJECTIVE_MONEY.
+            order: 0,
+            storage_index: -1,
+            object_id: 0,
+            amount: 7,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_active_loot_guid(loot_guid);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: Vec::new(),
+                slot: 0,
+            },
+        );
+        insert_allowed_coin_loot_like_cpp(&mut session, loot_guid, player_guid, 7);
+
+        session.handle_loot_money(loot_money_packet()).await;
+
+        assert_eq!(session.player_gold_like_cpp(), 7);
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::CoinRemoved as u16
+        );
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootMoneyNotify as u16
+        );
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::QuestGiverQuestComplete as u16
+        );
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::QuestUpdateComplete as u16
+        );
     }
 
     #[tokio::test]

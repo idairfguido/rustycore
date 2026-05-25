@@ -22,6 +22,7 @@ pub mod party;
 pub mod pet;
 pub mod query;
 pub mod quest;
+pub mod reputation;
 pub mod social;
 pub mod spell;
 pub mod trainer;

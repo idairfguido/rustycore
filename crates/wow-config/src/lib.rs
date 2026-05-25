@@ -1396,7 +1396,7 @@ LoginDatabaseInfo = "127.0.0.1;3306;trinity;trinity;auth"
     #[test]
     fn test_world_config_registry_covers_cpp_inventory() {
         let registry = world_config_registry();
-        assert_eq!(registry.len(), 335);
+        assert_eq!(registry.len(), 339);
         assert_eq!(
             registry
                 .iter()
@@ -1409,7 +1409,7 @@ LoginDatabaseInfo = "127.0.0.1;3306;trinity;trinity;auth"
                 .iter()
                 .filter(|entry| entry.kind == WorldConfigKind::Float)
                 .count(),
-            32
+            36
         );
         assert_eq!(
             registry

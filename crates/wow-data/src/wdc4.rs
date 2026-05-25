@@ -490,6 +490,11 @@ impl Wdc4Reader {
         self.read_field(record_idx, field) as i32
     }
 
+    /// Read a field as f32 from a record index.
+    pub fn get_field_f32(&self, record_idx: usize, field: usize) -> f32 {
+        f32::from_bits(self.read_field(record_idx, field))
+    }
+
     /// Read a field as u8 from a record index.
     pub fn get_field_u8(&self, record_idx: usize, field: usize) -> u8 {
         self.read_field(record_idx, field) as u8
@@ -588,6 +593,37 @@ impl Wdc4Reader {
     /// Read an array element as i16 (for short[] arrays like StatModifierBonusAmount).
     pub fn get_array_i16(&self, record_idx: usize, field: usize, array_index: usize) -> i16 {
         self.get_array_element(record_idx, field, array_index, 16) as i16
+    }
+
+    /// Read an array element as i32.
+    pub fn get_array_i32(&self, record_idx: usize, field: usize, array_index: usize) -> i32 {
+        let info = &self.field_info[field];
+        let element_bits = 32;
+        let bit_offset = info.field_offset_bits as usize + array_index * element_bits;
+        let record_start = if !self.record_offsets.is_empty() {
+            self.record_offsets[record_idx]
+        } else {
+            record_idx * self.header.record_size as usize
+        };
+        sign_extend(
+            read_bits(&self.record_data, record_start, bit_offset, element_bits),
+            32,
+        )
+    }
+
+    /// Read an array element as i64.
+    pub fn get_array_i64(&self, record_idx: usize, field: usize, array_index: usize) -> i64 {
+        let info = &self.field_info[field];
+        let element_bits = 64;
+        let bit_offset = info.field_offset_bits as usize + array_index * element_bits;
+        let record_start = if !self.record_offsets.is_empty() {
+            self.record_offsets[record_idx]
+        } else {
+            record_idx * self.header.record_size as usize
+        };
+        let lo = read_bits(&self.record_data, record_start, bit_offset, 32) as u64;
+        let hi = read_bits(&self.record_data, record_start, bit_offset + 32, 32) as u64;
+        ((hi << 32) | lo) as i64
     }
 
     /// Read an array element as u16 (for ushort[] arrays like QuestXP::Difficulty).

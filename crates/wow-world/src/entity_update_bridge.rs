@@ -834,6 +834,7 @@ fn active_player_data_update_to_packet(
     packet_update.xp = update.values.xp;
     packet_update.next_level_xp = update.values.next_level_xp;
     packet_update.character_points = update.values.character_points;
+    packet_update.watched_faction_index = update.values.watched_faction_index;
     packet_update.num_backpack_slots = update.values.num_backpack_slots;
     packet_update.farsight_object = update.values.farsight_object;
     packet_update
@@ -867,7 +868,8 @@ mod tests {
     use wow_entities::{
         ACTIVE_PLAYER_DATA_COINAGE_BIT, ACTIVE_PLAYER_DATA_PARENT_BIT,
         ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT,
-        ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT, AREA_TRIGGER_DATA_DURATION_BIT,
+        ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT,
+        ACTIVE_PLAYER_DATA_WATCHED_FACTION_INDEX_BIT, AREA_TRIGGER_DATA_DURATION_BIT,
         AREA_TRIGGER_DATA_PARENT_BIT, Bag, CONTAINER_DATA_NUM_SLOTS_BIT,
         CONVERSATION_DATA_LAST_LINE_END_TIME_BIT, CONVERSATION_DATA_PARENT_BIT,
         CORPSE_DATA_DISPLAY_ID_BIT, CORPSE_DATA_PARENT_BIT, Corpse, CorpseType,
@@ -894,6 +896,7 @@ mod tests {
         let mut player = Player::new(Some(7), false);
         player.clear_data_changes();
         player.set_money(123_456);
+        player.set_watched_faction_index_like_cpp(42);
 
         let update = player.values_update(true);
         let packet_update = player_values_update_to_packet(&update).unwrap();
@@ -911,7 +914,12 @@ mod tests {
             &active.active_player_data_mask,
             ACTIVE_PLAYER_DATA_COINAGE_BIT
         ));
+        assert!(mask_has(
+            &active.active_player_data_mask,
+            ACTIVE_PLAYER_DATA_WATCHED_FACTION_INDEX_BIT
+        ));
         assert_eq!(active.coinage, 123_456);
+        assert_eq!(active.watched_faction_index, 42);
     }
 
     #[test]

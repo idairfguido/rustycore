@@ -1265,6 +1265,7 @@ pub struct ItemCreateData {
     pub owner_guid: ObjectGuid,
     pub contained_in: ObjectGuid,
     pub stack_count: u32,
+    pub dynamic_flags: u32,
     pub durability: u32,
     pub max_durability: u32,
     pub random_properties_seed: i32,
@@ -1438,6 +1439,8 @@ pub struct PlayerCreateData {
     pub quest_log: Vec<(u32, u32, i64, [u16; 24])>,
     /// Current money in copper (Coinage field in ActivePlayerData).
     pub coinage: u64,
+    /// ActivePlayerData::WatchedFactionIndex.
+    pub watched_faction_index: i32,
 }
 
 impl PlayerCreateData {
@@ -2051,7 +2054,7 @@ impl PlayerCreateData {
         buf.write_uint32(0);
 
         // WatchedFactionIndex
-        buf.write_int32(-1);
+        buf.write_int32(self.watched_faction_index);
 
         // CombatRatings[32]
         for _ in 0..32 {
@@ -2918,6 +2921,7 @@ impl UpdateObject {
             farsight_object: ObjectGuid::EMPTY,
             skill_info,
             coinage,
+            watched_faction_index: -1,
             quest_log,
         };
 
@@ -3809,7 +3813,7 @@ fn write_item_create_block(buf: &mut WorldPacket, guid: &ObjectGuid, data: &Item
     }
 
     // DynamicFlags
-    val_buf.write_uint32(0);
+    val_buf.write_uint32(data.dynamic_flags);
 
     // 13 x ItemEnchantment (all zeros)
     for _ in 0..13 {
@@ -7753,6 +7757,7 @@ mod tests {
                 owner_guid,
                 contained_in: owner_guid,
                 stack_count: 7,
+                dynamic_flags: 0,
                 durability: 12,
                 max_durability: 20,
                 random_properties_seed: 456,
@@ -8960,6 +8965,7 @@ mod tests {
             skill_info: Vec::new(),
             quest_log: Vec::new(),
             coinage: 0,
+            watched_faction_index: -1,
         }
     }
 

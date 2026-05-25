@@ -56,6 +56,7 @@ pub mod progression_rewards;
 pub mod quest;
 pub mod quest_xp;
 pub mod rand_prop_points;
+pub mod reputation;
 pub mod skill;
 pub mod skill_talent;
 pub mod spawn_group;

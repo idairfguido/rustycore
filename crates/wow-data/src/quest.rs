@@ -83,6 +83,8 @@ pub struct QuestTemplate {
     pub quest_type: u8,
     pub quest_level: i32,
     pub quest_max_scaling_level: i32,
+    /// C++ `Quest::GetQuestPackageID()` / `_packageID` from `quest_template.QuestPackageID`.
+    pub quest_package_id: u32,
     pub min_level: i32,
     pub quest_sort_id: i32,
     pub quest_info_id: u16,
@@ -96,12 +98,30 @@ pub struct QuestTemplate {
     pub reward_display_spell: [u32; QUEST_REWARD_DISPLAY_SPELL_COUNT],
     pub reward_spell: u32,
     pub reward_honor: u32,
+    pub reward_title_id: u32,
+    pub reward_skill_line_id: u32,
+    pub reward_skill_points: u32,
+    pub reward_mail_template_id: u32,
+    pub reward_mail_delay_secs: u32,
+    pub reward_mail_sender_entry: u32,
+    /// C++ `Quest::RewardFactionId[0..5]` from `quest_template.RewardFactionID1..5`.
+    pub reward_faction_ids: [u32; QUEST_REWARD_REPUTATIONS_COUNT],
+    /// C++ `Quest::RewardFactionValue[0..5]` from `quest_template.RewardFactionValue1..5`.
+    pub reward_faction_values: [i32; QUEST_REWARD_REPUTATIONS_COUNT],
+    /// C++ `Quest::RewardFactionOverride[0..5]` from `quest_template.RewardFactionOverride1..5`.
+    pub reward_faction_overrides: [i32; QUEST_REWARD_REPUTATIONS_COUNT],
+    /// C++ `Quest::RewardFactionCapIn[0..5]` from `quest_template.RewardFactionCapIn1..5`.
+    pub reward_faction_cap_in: [i32; QUEST_REWARD_REPUTATIONS_COUNT],
+    /// C++ `Quest::GetRewardReputationMask()` / `_rewardReputationMask`.
+    pub reward_faction_flags: u32,
     /// C++ `Quest::GetSrcItemId()` / `_sourceItemId` from `quest_template.StartItem`.
     pub source_item_id: u32,
     /// C++ `Quest::GetSrcItemCount()` / `_sourceItemIdCount` from `quest_template_addon.ProvidedItemCount`.
     pub source_item_count: u32,
     /// C++ `Quest::GetSrcSpell()` / `_sourceSpellID` from `quest_template_addon.SourceSpellID`.
     pub source_spell_id: u32,
+    /// C++ `Quest::GetLimitTime()` / `_limitTime` from `quest_template.TimeAllowed`.
+    pub limit_time_secs: i64,
     /// C++ `Quest::GetExpansion()` / `quest_template.Expansion`.
     pub expansion: i32,
     pub flags: u32,
@@ -111,6 +131,8 @@ pub struct QuestTemplate {
     pub event_id_for_quest: u16,
     pub reward_items: [u32; QUEST_REWARD_ITEM_COUNT],
     pub reward_amounts: [u32; QUEST_REWARD_ITEM_COUNT],
+    pub reward_currencies: [u32; QUEST_REWARD_CURRENCY_COUNT],
+    pub reward_currency_amounts: [u32; QUEST_REWARD_CURRENCY_COUNT],
     pub item_drop: [u32; QUEST_ITEM_DROP_COUNT],
     pub item_drop_quantity: [u32; QUEST_ITEM_DROP_COUNT],
     // Strings
@@ -156,9 +178,13 @@ pub struct QuestTemplate {
     pub required_max_rep_faction: u32,
     /// C++ `Quest::GetRequiredMaxRepValue()` from `quest_template_addon`.
     pub required_max_rep_value: i32,
-    /// Optional reward items player can choose (up to 6). (item_id, quantity).
+    /// Optional reward choices player can choose (up to 6). (item_id, quantity).
     /// item_id == 0 means that slot is empty.
     pub reward_choice_items: [(u32, u32); QUEST_REWARD_CHOICES_COUNT],
+    /// C++ `Quest::RewardChoiceItemType`, loaded from `quest_reward_choice_items.Type1..Type6`.
+    ///
+    /// `0 = LootItemType::Item`, `1 = LootItemType::Currency`.
+    pub reward_choice_item_types: [u8; QUEST_REWARD_CHOICES_COUNT],
 }
 
 impl QuestTemplate {
@@ -803,107 +829,164 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
         loop {
             let id: u32 = result.read(0);
             let (flags, special_flags) = normalize_quest_flags_like_cpp(
-                result.try_read::<u32>(19).unwrap_or(0),
-                result.try_read::<u32>(66).unwrap_or(0),
+                result.try_read::<u32>(20).unwrap_or(0),
+                result.try_read::<u32>(67).unwrap_or(0),
             );
             let quest = QuestTemplate {
                 id,
                 quest_type: result.try_read::<u8>(1).unwrap_or(2),
                 quest_level: result.try_read::<i32>(2).unwrap_or(0),
                 quest_max_scaling_level: result.try_read::<i32>(3).unwrap_or(0),
-                min_level: result.try_read::<i32>(4).unwrap_or(0),
-                quest_sort_id: result.try_read::<i32>(5).unwrap_or(0),
-                quest_info_id: result.try_read::<u16>(6).unwrap_or(0),
-                suggested_group_num: result.try_read::<u8>(7).unwrap_or(0),
-                reward_next_quest: result.try_read::<u32>(8).unwrap_or(0),
-                reward_xp_difficulty: result.try_read::<u32>(9).unwrap_or(0),
-                reward_xp_multiplier: result.try_read::<f32>(10).unwrap_or(1.0),
-                reward_money_difficulty: result.try_read::<u32>(11).unwrap_or(0),
-                reward_money_multiplier: result.try_read::<f32>(12).unwrap_or(1.0),
-                reward_bonus_money: result.try_read::<u32>(13).unwrap_or(0),
+                quest_package_id: result.try_read::<u32>(4).unwrap_or(0),
+                min_level: result.try_read::<i32>(5).unwrap_or(0),
+                quest_sort_id: result.try_read::<i32>(6).unwrap_or(0),
+                quest_info_id: result.try_read::<u16>(7).unwrap_or(0),
+                suggested_group_num: result.try_read::<u8>(8).unwrap_or(0),
+                reward_next_quest: result.try_read::<u32>(9).unwrap_or(0),
+                reward_xp_difficulty: result.try_read::<u32>(10).unwrap_or(0),
+                reward_xp_multiplier: result.try_read::<f32>(11).unwrap_or(1.0),
+                reward_money_difficulty: result.try_read::<u32>(12).unwrap_or(0),
+                reward_money_multiplier: result.try_read::<f32>(13).unwrap_or(1.0),
+                reward_bonus_money: result.try_read::<u32>(14).unwrap_or(0),
                 reward_display_spell: [
-                    result.try_read::<u32>(14).unwrap_or(0),
                     result.try_read::<u32>(15).unwrap_or(0),
                     result.try_read::<u32>(16).unwrap_or(0),
+                    result.try_read::<u32>(17).unwrap_or(0),
                 ],
-                reward_spell: result.try_read::<u32>(17).unwrap_or(0),
-                reward_honor: result.try_read::<u32>(18).unwrap_or(0),
-                source_item_id: result.try_read::<u32>(68).unwrap_or(0),
-                source_item_count: result.try_read::<u32>(70).unwrap_or(0),
-                source_spell_id: result.try_read::<u32>(69).unwrap_or(0),
-                expansion: result.try_read::<i32>(67).unwrap_or(0),
+                reward_spell: result.try_read::<u32>(18).unwrap_or(0),
+                reward_honor: result.try_read::<u32>(19).unwrap_or(0),
+                reward_title_id: result.try_read::<u32>(89).unwrap_or(0),
+                reward_skill_line_id: result.try_read::<u32>(87).unwrap_or(0),
+                reward_skill_points: result.try_read::<u32>(88).unwrap_or(0),
+                reward_mail_template_id: result.try_read::<u32>(90).unwrap_or(0),
+                reward_mail_delay_secs: result.try_read::<u32>(91).unwrap_or(0),
+                reward_mail_sender_entry: result.try_read::<u32>(92).unwrap_or(0),
+                reward_faction_ids: [
+                    result.try_read::<u32>(93).unwrap_or(0),
+                    result.try_read::<u32>(97).unwrap_or(0),
+                    result.try_read::<u32>(101).unwrap_or(0),
+                    result.try_read::<u32>(105).unwrap_or(0),
+                    result.try_read::<u32>(109).unwrap_or(0),
+                ],
+                reward_faction_values: [
+                    result.try_read::<i32>(94).unwrap_or(0),
+                    result.try_read::<i32>(98).unwrap_or(0),
+                    result.try_read::<i32>(102).unwrap_or(0),
+                    result.try_read::<i32>(106).unwrap_or(0),
+                    result.try_read::<i32>(110).unwrap_or(0),
+                ],
+                reward_faction_overrides: [
+                    result.try_read::<i32>(95).unwrap_or(0),
+                    result.try_read::<i32>(99).unwrap_or(0),
+                    result.try_read::<i32>(103).unwrap_or(0),
+                    result.try_read::<i32>(107).unwrap_or(0),
+                    result.try_read::<i32>(111).unwrap_or(0),
+                ],
+                reward_faction_cap_in: [
+                    result.try_read::<i32>(96).unwrap_or(0),
+                    result.try_read::<i32>(100).unwrap_or(0),
+                    result.try_read::<i32>(104).unwrap_or(0),
+                    result.try_read::<i32>(108).unwrap_or(0),
+                    result.try_read::<i32>(112).unwrap_or(0),
+                ],
+                reward_faction_flags: result.try_read::<u32>(113).unwrap_or(0),
+                source_item_id: result.try_read::<u32>(69).unwrap_or(0),
+                source_item_count: result.try_read::<u32>(71).unwrap_or(0),
+                source_spell_id: result.try_read::<u32>(70).unwrap_or(0),
+                limit_time_secs: result.try_read::<i64>(72).unwrap_or(0),
+                expansion: result.try_read::<i32>(68).unwrap_or(0),
                 flags,
-                flags_ex: result.try_read::<u32>(20).unwrap_or(0),
-                flags_ex2: result.try_read::<u32>(21).unwrap_or(0),
+                flags_ex: result.try_read::<u32>(21).unwrap_or(0),
+                flags_ex2: result.try_read::<u32>(22).unwrap_or(0),
                 special_flags,
                 event_id_for_quest: 0,
                 reward_items: [
-                    result.try_read::<u32>(22).unwrap_or(0),
-                    result.try_read::<u32>(26).unwrap_or(0),
-                    result.try_read::<u32>(30).unwrap_or(0),
-                    result.try_read::<u32>(34).unwrap_or(0),
-                ],
-                reward_amounts: [
                     result.try_read::<u32>(23).unwrap_or(0),
                     result.try_read::<u32>(27).unwrap_or(0),
                     result.try_read::<u32>(31).unwrap_or(0),
                     result.try_read::<u32>(35).unwrap_or(0),
                 ],
-                item_drop: [
+                reward_amounts: [
                     result.try_read::<u32>(24).unwrap_or(0),
                     result.try_read::<u32>(28).unwrap_or(0),
                     result.try_read::<u32>(32).unwrap_or(0),
                     result.try_read::<u32>(36).unwrap_or(0),
                 ],
-                item_drop_quantity: [
+                reward_currencies: [
+                    result.try_read::<u32>(79).unwrap_or(0),
+                    result.try_read::<u32>(81).unwrap_or(0),
+                    result.try_read::<u32>(83).unwrap_or(0),
+                    result.try_read::<u32>(85).unwrap_or(0),
+                ],
+                reward_currency_amounts: [
+                    result.try_read::<u32>(80).unwrap_or(0),
+                    result.try_read::<u32>(82).unwrap_or(0),
+                    result.try_read::<u32>(84).unwrap_or(0),
+                    result.try_read::<u32>(86).unwrap_or(0),
+                ],
+                item_drop: [
                     result.try_read::<u32>(25).unwrap_or(0),
                     result.try_read::<u32>(29).unwrap_or(0),
                     result.try_read::<u32>(33).unwrap_or(0),
                     result.try_read::<u32>(37).unwrap_or(0),
                 ],
-                log_title: result.try_read::<String>(38).unwrap_or_default(),
-                log_description: result.try_read::<String>(39).unwrap_or_default(),
-                quest_description: result.try_read::<String>(40).unwrap_or_default(),
-                area_description: result.try_read::<String>(41).unwrap_or_default(),
-                quest_completion_log: result.try_read::<String>(42).unwrap_or_default(),
-                allowable_races: result.try_read::<i64>(43).map(|v| v as u64).unwrap_or(0),
-                allowable_classes: result.try_read::<u32>(44).unwrap_or(0),
-                max_level: result.try_read::<u8>(45).unwrap_or(0),
-                prev_quest_id: result.try_read::<i32>(46).unwrap_or(0),
-                next_quest_id: result.try_read::<u32>(63).unwrap_or(0),
-                exclusive_group: result.try_read::<i32>(64).unwrap_or(0),
-                breadcrumb_for_quest_id: result.try_read::<i32>(65).unwrap_or(0),
+                item_drop_quantity: [
+                    result.try_read::<u32>(26).unwrap_or(0),
+                    result.try_read::<u32>(30).unwrap_or(0),
+                    result.try_read::<u32>(34).unwrap_or(0),
+                    result.try_read::<u32>(38).unwrap_or(0),
+                ],
+                log_title: result.try_read::<String>(39).unwrap_or_default(),
+                log_description: result.try_read::<String>(40).unwrap_or_default(),
+                quest_description: result.try_read::<String>(41).unwrap_or_default(),
+                area_description: result.try_read::<String>(42).unwrap_or_default(),
+                quest_completion_log: result.try_read::<String>(43).unwrap_or_default(),
+                allowable_races: result.try_read::<i64>(44).map(|v| v as u64).unwrap_or(0),
+                allowable_classes: result.try_read::<u32>(45).unwrap_or(0),
+                max_level: result.try_read::<u8>(46).unwrap_or(0),
+                prev_quest_id: result.try_read::<i32>(47).unwrap_or(0),
+                next_quest_id: result.try_read::<u32>(64).unwrap_or(0),
+                exclusive_group: result.try_read::<i32>(65).unwrap_or(0),
+                breadcrumb_for_quest_id: result.try_read::<i32>(66).unwrap_or(0),
                 dependent_previous_quests: Vec::new(),
                 dependent_breadcrumb_quests: Vec::new(),
-                required_min_rep_faction: result.try_read::<u32>(47).unwrap_or(0),
-                required_min_rep_value: result.try_read::<i32>(48).unwrap_or(0),
-                required_max_rep_faction: result.try_read::<u32>(49).unwrap_or(0),
-                required_max_rep_value: result.try_read::<i32>(50).unwrap_or(0),
+                required_min_rep_faction: result.try_read::<u32>(48).unwrap_or(0),
+                required_min_rep_value: result.try_read::<i32>(49).unwrap_or(0),
+                required_max_rep_faction: result.try_read::<u32>(50).unwrap_or(0),
+                required_max_rep_value: result.try_read::<i32>(51).unwrap_or(0),
                 reward_choice_items: [
                     (
-                        result.try_read::<u32>(51).unwrap_or(0),
                         result.try_read::<u32>(52).unwrap_or(0),
-                    ),
-                    (
                         result.try_read::<u32>(53).unwrap_or(0),
+                    ),
+                    (
                         result.try_read::<u32>(54).unwrap_or(0),
-                    ),
-                    (
                         result.try_read::<u32>(55).unwrap_or(0),
+                    ),
+                    (
                         result.try_read::<u32>(56).unwrap_or(0),
-                    ),
-                    (
                         result.try_read::<u32>(57).unwrap_or(0),
+                    ),
+                    (
                         result.try_read::<u32>(58).unwrap_or(0),
-                    ),
-                    (
                         result.try_read::<u32>(59).unwrap_or(0),
-                        result.try_read::<u32>(60).unwrap_or(0),
                     ),
                     (
+                        result.try_read::<u32>(60).unwrap_or(0),
                         result.try_read::<u32>(61).unwrap_or(0),
-                        result.try_read::<u32>(62).unwrap_or(0),
                     ),
+                    (
+                        result.try_read::<u32>(62).unwrap_or(0),
+                        result.try_read::<u32>(63).unwrap_or(0),
+                    ),
+                ],
+                reward_choice_item_types: [
+                    result.try_read::<u8>(73).unwrap_or(0),
+                    result.try_read::<u8>(74).unwrap_or(0),
+                    result.try_read::<u8>(75).unwrap_or(0),
+                    result.try_read::<u8>(76).unwrap_or(0),
+                    result.try_read::<u8>(77).unwrap_or(0),
+                    result.try_read::<u8>(78).unwrap_or(0),
                 ],
                 objectives: Vec::new(), // filled next
             };
@@ -1078,6 +1161,7 @@ mod tests {
             quest_type: 2,
             quest_level: 1,
             quest_max_scaling_level: 0,
+            quest_package_id: 0,
             min_level: 1,
             quest_sort_id,
             quest_info_id: 0,
@@ -1091,9 +1175,21 @@ mod tests {
             reward_display_spell: [0; QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            reward_title_id: 0,
+            reward_skill_line_id: 0,
+            reward_skill_points: 0,
+            reward_mail_template_id: 0,
+            reward_mail_delay_secs: 0,
+            reward_mail_sender_entry: 0,
+            reward_faction_ids: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_values: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_overrides: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_cap_in: [0; QUEST_REWARD_REPUTATIONS_COUNT],
+            reward_faction_flags: 0,
             source_item_id: 0,
             source_item_count: 0,
             source_spell_id: 0,
+            limit_time_secs: 0,
             expansion: 0,
             flags,
             flags_ex: 0,
@@ -1102,6 +1198,8 @@ mod tests {
             event_id_for_quest: 0,
             reward_items: [0; QUEST_REWARD_ITEM_COUNT],
             reward_amounts: [0; QUEST_REWARD_ITEM_COUNT],
+            reward_currencies: [0; QUEST_REWARD_CURRENCY_COUNT],
+            reward_currency_amounts: [0; QUEST_REWARD_CURRENCY_COUNT],
             item_drop: [0; QUEST_ITEM_DROP_COUNT],
             item_drop_quantity: [0; QUEST_ITEM_DROP_COUNT],
             log_title: String::new(),
@@ -1124,6 +1222,7 @@ mod tests {
             required_max_rep_faction: 0,
             required_max_rep_value: 0,
             reward_choice_items: [(0, 0); QUEST_REWARD_CHOICES_COUNT],
+            reward_choice_item_types: [0; QUEST_REWARD_CHOICES_COUNT],
         }
     }
 
