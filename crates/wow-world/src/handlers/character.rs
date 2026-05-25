@@ -3094,6 +3094,11 @@ impl WorldSession {
                 create_data.max_health = i64::from(creature.max_hp());
                 create_data.level = creature.level();
                 create_data.npc_flags = creature.npc_flags_mask_like_cpp();
+                create_data.npc_flags = self
+                    .represented_viewer_dependent_creature_npc_flags_like_cpp(
+                        creature.guid(),
+                        create_data.npc_flags,
+                    );
                 create_data.zone_id = zone_id;
                 blocks.push(UpdateObject::create_creature_block(
                     create_data,
@@ -3277,12 +3282,6 @@ impl WorldSession {
                 speed_run_rate: speed_run,
             };
 
-            blocks.push(UpdateObject::create_creature_block(
-                create_data.clone(),
-                &creature_pos,
-            ));
-            visible_guids.push(guid);
-
             // Register through canonical map state when available; the legacy
             // per-session AI object remains a compatibility facade/cache.
             let aggro_radius = if faction == 35 { 0.0 } else { 15.0 };
@@ -3306,6 +3305,18 @@ impl WorldSession {
                 phase_group_id,
                 terrain_swap_map,
             );
+
+            let mut viewer_create_data = create_data.clone();
+            viewer_create_data.npc_flags = self
+                .represented_viewer_dependent_creature_npc_flags_like_cpp(
+                    guid,
+                    viewer_create_data.npc_flags,
+                );
+            blocks.push(UpdateObject::create_creature_block(
+                viewer_create_data,
+                &creature_pos,
+            ));
+            visible_guids.push(guid);
 
             if !result.next_row() {
                 break;
@@ -3396,6 +3407,11 @@ impl WorldSession {
                     create_data.max_health = i64::from(creature.max_hp());
                     create_data.level = creature.level();
                     create_data.npc_flags = creature.npc_flags_mask_like_cpp();
+                    create_data.npc_flags = self
+                        .represented_viewer_dependent_creature_npc_flags_like_cpp(
+                            guid,
+                            create_data.npc_flags,
+                        );
                     new_creature_blocks.push(UpdateObject::create_creature_block(
                         create_data,
                         &creature.position(),
@@ -3677,10 +3693,6 @@ impl WorldSession {
                         speed_walk_rate: speed_walk,
                         speed_run_rate: speed_run,
                     };
-                    new_creature_blocks.push(UpdateObject::create_creature_block(
-                        create_data.clone(),
-                        &creature_pos,
-                    ));
 
                     // Register in AI tracker
                     let aggro_radius = if faction == 35 { 0.0 } else { 15.0 };
@@ -3689,7 +3701,7 @@ impl WorldSession {
                     self.register_world_creature(
                         map_id,
                         creature_pos,
-                        create_data,
+                        create_data.clone(),
                         min_dmg,
                         max_dmg,
                         aggro_radius,
@@ -3704,6 +3716,17 @@ impl WorldSession {
                         phase_group_id,
                         terrain_swap_map,
                     );
+
+                    let mut viewer_create_data = create_data.clone();
+                    viewer_create_data.npc_flags = self
+                        .represented_viewer_dependent_creature_npc_flags_like_cpp(
+                            guid,
+                            viewer_create_data.npc_flags,
+                        );
+                    new_creature_blocks.push(UpdateObject::create_creature_block(
+                        viewer_create_data,
+                        &creature_pos,
+                    ));
                 }
 
                 if !cr.next_row() {

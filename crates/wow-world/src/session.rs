@@ -67,6 +67,10 @@ use wow_data::{
         CreatureOnKillReputationStoreLikeCpp, RepSpilloverTemplateStoreLikeCpp,
         ReputationRewardRateStoreLikeCpp,
     },
+    spell_click::{
+        SPELL_CLICK_USER_FRIEND_LIKE_CPP, SPELL_CLICK_USER_PARTY_LIKE_CPP,
+        SPELL_CLICK_USER_RAID_LIKE_CPP, UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP,
+    },
     spell_duration_ms_like_cpp, spell_effect_radius_like_cpp,
 };
 use wow_database::{
@@ -1080,6 +1084,30 @@ pub(crate) struct RepresentedCreatureAccessLikeCpp {
     pub npc_flags: u32,
     pub npc_flags2: u32,
     pub faction_template_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedCanSeeSpellClickOutcomeLikeCpp {
+    Visible,
+    Hidden,
+    ExactContextUnrepresented,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RepresentedSpellClickCreatureSnapshotLikeCpp {
+    guid: ObjectGuid,
+    entry: u32,
+    map_id: u32,
+    instance_id: u32,
+    position: Position,
+    phase_shift: PhaseShift,
+    npc_flags: u32,
+    faction_template_id: u32,
+    level: u32,
+    health: u64,
+    max_health: u64,
+    is_alive: bool,
+    is_summon: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4840,6 +4868,199 @@ impl WorldSession {
             npc_flags2: creature.ai_ownership().npc_flags2,
             faction_template_id: creature.unit().data().faction_template.max(0) as u32,
         })
+    }
+
+    fn represented_spell_click_creature_snapshot_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<RepresentedSpellClickCreatureSnapshotLikeCpp> {
+        if guid.is_empty() || !guid.is_any_type_creature() {
+            return None;
+        }
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
+        };
+        let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let record = map.map().map_object_record(guid)?;
+        let creature = if guid.is_pet() {
+            record.pet()?.creature()
+        } else {
+            record.creature()?
+        };
+
+        Some(RepresentedSpellClickCreatureSnapshotLikeCpp {
+            guid: creature.guid(),
+            entry: creature.entry(),
+            map_id: creature.unit().world().map_id(),
+            instance_id: creature.unit().world().instance_id(),
+            position: creature.position(),
+            phase_shift: creature.unit().world().phase_shift().clone(),
+            npc_flags: creature.ai_ownership().npc_flags,
+            faction_template_id: creature.unit().data().faction_template.max(0) as u32,
+            level: u32::from(creature.level()),
+            health: creature.current_health(),
+            max_health: creature.max_health(),
+            is_alive: creature.is_alive(),
+            is_summon: creature.is_summon_like_cpp(),
+        })
+    }
+
+    pub(crate) fn represented_can_see_spell_click_on_creature_like_cpp(
+        &self,
+        creature_guid: ObjectGuid,
+    ) -> RepresentedCanSeeSpellClickOutcomeLikeCpp {
+        let Some(spell_click_store) = self.npc_spell_click_store.as_ref() else {
+            return RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented;
+        };
+        let Some(condition_store) = self.condition_store.as_ref() else {
+            return RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented;
+        };
+        let Some(creature) = self.represented_spell_click_creature_snapshot_like_cpp(creature_guid)
+        else {
+            return RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented;
+        };
+
+        if (u64::from(creature.npc_flags) & UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP) == 0 {
+            return RepresentedCanSeeSpellClickOutcomeLikeCpp::Hidden;
+        }
+
+        let click_bounds = spell_click_store.spell_click_info_map_bounds_like_cpp(creature.entry);
+        if click_bounds.is_empty() {
+            return RepresentedCanSeeSpellClickOutcomeLikeCpp::Hidden;
+        }
+
+        let Some(clicker_object) = self.build_condition_player_object_like_cpp() else {
+            return RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented;
+        };
+        let mut target_object = WorldObject::new(
+            false,
+            TypeId::Unit,
+            wow_constants::TypeMask::OBJECT | wow_constants::TypeMask::UNIT,
+        );
+        target_object.object_mut().create(creature.guid);
+        target_object.object_mut().set_entry(creature.entry);
+        let _ = target_object.set_map(creature.map_id, creature.instance_id);
+        target_object.relocate(creature.position);
+        *target_object.phase_shift_mut() = creature.phase_shift.clone();
+
+        let player_unit_snapshot = self.condition_player_unit_snapshot_like_cpp();
+        let player_snapshot = self.condition_player_snapshot_like_cpp();
+        let creature_unit_snapshot = crate::conditions::ConditionUnitSnapshot {
+            level: creature.level,
+            health: creature.health,
+            max_health: creature.max_health,
+            class_mask: 0,
+            race: 0,
+            creature_type: None,
+            is_alive: creature.is_alive,
+            is_charmed: false,
+            in_water: false,
+            unit_state: 0,
+            stand_state: UnitStandStateType::Stand as u32,
+        };
+        let player_condition_store = self.player_condition_store().cloned();
+        let player_condition_context = self.represented_player_condition_context_like_cpp();
+        let area_table_store = self.area_table_store.as_ref().cloned();
+
+        for click_info in click_bounds {
+            match click_info.user_type {
+                SPELL_CLICK_USER_FRIEND_LIKE_CPP => {
+                    if creature.is_summon
+                        || self.faction_template_store.is_none()
+                        || self.player_faction_template_like_cpp.is_none()
+                    {
+                        return RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented;
+                    }
+                    let reaction = self.represented_get_reaction_to_like_cpp(
+                        RepresentedGetReactionInputLikeCpp {
+                            self_faction_template_id: self
+                                .player_faction_template_like_cpp
+                                .unwrap_or(0),
+                            target_faction_template_id: creature.faction_template_id,
+                            same_object: false,
+                            attackable_by_summoner: false,
+                            same_charmer_or_owner_or_self: false,
+                            self_has_player_owner: true,
+                            target_has_player_owner: false,
+                            target_player_owner_is_current_session: false,
+                            target_owner_forced_rank_for_self: None,
+                            same_player_owner: false,
+                            duel_in_progress: false,
+                            same_raid: false,
+                            self_unit_player_controlled: true,
+                            target_unit_player_controlled: false,
+                            self_ffa_pvp: false,
+                            target_ffa_pvp: false,
+                            self_ignores_reputation: false,
+                            target_ignores_reputation: false,
+                            target_is_unit: true,
+                            target_player_contested_pvp: false,
+                        },
+                    );
+                    if reaction < wow_data::reputation::ReputationRankLikeCpp::Friendly {
+                        return RepresentedCanSeeSpellClickOutcomeLikeCpp::Hidden;
+                    }
+                }
+                SPELL_CLICK_USER_PARTY_LIKE_CPP | SPELL_CLICK_USER_RAID_LIKE_CPP => {
+                    return RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented;
+                }
+                _ => {}
+            }
+
+            if crate::conditions::is_object_meeting_spell_click_conditions_like_cpp(
+                condition_store,
+                creature.entry,
+                click_info.spell_id,
+                Some(&clicker_object),
+                Some(&target_object),
+                |condition, source_info| {
+                    source_info.set_unit_target_snapshot(0, player_unit_snapshot);
+                    source_info.set_player_target_snapshot(0, player_snapshot);
+                    source_info.set_unit_target_snapshot(1, creature_unit_snapshot);
+                    if let Some(store) = player_condition_store.as_ref() {
+                        source_info.set_player_condition_store(store.as_ref());
+                        source_info.set_player_condition_context(
+                            0,
+                            player_condition_context.as_context(self),
+                        );
+                    }
+                    crate::conditions::condition_meets_basic_like_cpp(
+                        condition,
+                        source_info,
+                        |area_id, required_area_id| {
+                            area_table_store.as_ref().is_some_and(|store| {
+                                store.is_in_area_like_cpp(area_id, required_area_id)
+                            })
+                        },
+                    )
+                    .value()
+                    .unwrap_or(false)
+                },
+            ) {
+                return RepresentedCanSeeSpellClickOutcomeLikeCpp::Visible;
+            }
+        }
+
+        RepresentedCanSeeSpellClickOutcomeLikeCpp::Hidden
+    }
+
+    pub(crate) fn represented_viewer_dependent_creature_npc_flags_like_cpp(
+        &self,
+        creature_guid: ObjectGuid,
+        npc_flags: u64,
+    ) -> u64 {
+        if (npc_flags & UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP) == 0 {
+            return npc_flags;
+        }
+
+        match self.represented_can_see_spell_click_on_creature_like_cpp(creature_guid) {
+            RepresentedCanSeeSpellClickOutcomeLikeCpp::Hidden => {
+                npc_flags & !UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP
+            }
+            RepresentedCanSeeSpellClickOutcomeLikeCpp::Visible
+            | RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented => npc_flags,
+        }
     }
 
     pub(crate) fn represented_npc_can_interact_with_like_cpp(
@@ -19402,13 +19623,6 @@ impl WorldSession {
                 r.home_pos
             );
 
-            // Send CREATE block to client.
-            let block = UpdateObject::create_creature_block(r.create_data.clone(), &r.home_pos);
-            let pkt = UpdateObject::create_creatures(vec![block], r.map_id);
-            if let Err(e) = self.send_tx.send(pkt.to_bytes()) {
-                tracing::warn!("Failed to send respawn packet: {e}");
-            }
-
             // Recreate canonical map state.
             self.register_world_creature(
                 r.map_id,
@@ -19428,6 +19642,20 @@ impl WorldSession {
                 r.phase_group_id,
                 r.terrain_swap_map,
             );
+
+            // Send CREATE block to client with C++ viewer-dependent
+            // `UnitData::NpcFlags[0]` filtering; runtime keeps full flags.
+            let mut viewer_create_data = r.create_data.clone();
+            viewer_create_data.npc_flags = self
+                .represented_viewer_dependent_creature_npc_flags_like_cpp(
+                    guid,
+                    viewer_create_data.npc_flags,
+                );
+            let block = UpdateObject::create_creature_block(viewer_create_data, &r.home_pos);
+            let pkt = UpdateObject::create_creatures(vec![block], r.map_id);
+            if let Err(e) = self.send_tx.send(pkt.to_bytes()) {
+                tracing::warn!("Failed to send respawn packet: {e}");
+            }
             self.client_visible_guids_like_cpp.insert(guid);
         }
         // ──────────────────────────────────────────────────────────────────
@@ -28433,6 +28661,230 @@ mod tests {
         assert!(
             send_rx.try_recv().is_err(),
             "empty canonical gameobject source should not fall back to SQL or send creates"
+        );
+    }
+
+    #[test]
+    fn represented_can_see_spellclick_any_uses_canonical_creature_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(120);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 700,
+                spell_id: 900,
+                cast_flags: 0,
+                user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+            }],
+            |entry| entry == 700,
+            |spell| spell == 900,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            700,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32,
+        );
+
+        assert_eq!(
+            session.represented_can_see_spell_click_on_creature_like_cpp(creature_guid),
+            RepresentedCanSeeSpellClickOutcomeLikeCpp::Visible
+        );
+    }
+
+    #[test]
+    fn represented_can_see_spellclick_requires_viewer_flag_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(121);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 701,
+                spell_id: 901,
+                cast_flags: 0,
+                user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+            }],
+            |entry| entry == 701,
+            |spell| spell == 901,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            701,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            0,
+        );
+
+        assert_eq!(
+            session.represented_can_see_spell_click_on_creature_like_cpp(creature_guid),
+            RepresentedCanSeeSpellClickOutcomeLikeCpp::Hidden
+        );
+    }
+
+    #[test]
+    fn represented_can_see_spellclick_party_raid_require_exact_context_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(122);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 702,
+                spell_id: 902,
+                cast_flags: 0,
+                user_type: SPELL_CLICK_USER_PARTY_LIKE_CPP,
+            }],
+            |entry| entry == 702,
+            |spell| spell == 902,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            702,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32,
+        );
+
+        assert_eq!(
+            session.represented_can_see_spell_click_on_creature_like_cpp(creature_guid),
+            RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented
+        );
+    }
+
+    #[test]
+    fn represented_viewer_dependent_npc_flags_clears_hidden_spellclick_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(123);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [],
+            |entry| entry == 703,
+            |_| false,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            703,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            (UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32)
+                | wow_constants::unit::NPCFlags1::GOSSIP.bits(),
+        );
+
+        let filtered = session.represented_viewer_dependent_creature_npc_flags_like_cpp(
+            creature_guid,
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP
+                | u64::from(wow_constants::unit::NPCFlags1::GOSSIP.bits()),
+        );
+
+        assert_eq!(
+            filtered,
+            u64::from(wow_constants::unit::NPCFlags1::GOSSIP.bits())
+        );
+    }
+
+    #[test]
+    fn represented_viewer_dependent_npc_flags_keeps_unrepresented_spellclick_context_visible() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(124);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 704,
+                spell_id: 904,
+                cast_flags: 0,
+                user_type: SPELL_CLICK_USER_RAID_LIKE_CPP,
+            }],
+            |entry| entry == 704,
+            |spell| spell == 904,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            704,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32,
+        );
+
+        assert_eq!(
+            session.represented_can_see_spell_click_on_creature_like_cpp(creature_guid),
+            RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented
+        );
+        assert_eq!(
+            session.represented_viewer_dependent_creature_npc_flags_like_cpp(
+                creature_guid,
+                UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP,
+            ),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP
         );
     }
 
