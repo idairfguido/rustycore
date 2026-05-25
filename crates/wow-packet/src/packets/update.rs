@@ -8392,6 +8392,28 @@ mod tests {
     }
 
     #[test]
+    fn full_unit_values_update_block_matches_cpp_unitdata_npc_flags_delta_shape() {
+        let mut data = UnitDataValuesDeltaUpdate::default();
+        data.unit_data_mask[3] = (1 << 17) | (1 << 18) | (1 << 19);
+        data.npc_flags = [0x40, 0x1];
+
+        let mut block = WorldPacket::new_empty();
+        write_full_unit_values_update_block(&mut block, &ObjectGuid::EMPTY, &data);
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 17);
+        assert_eq!(
+            u32::from_le_bytes(bytes[7..11].try_into().unwrap()),
+            VALUES_TYPE_UNIT
+        );
+        assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 0x40);
+        assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 0x1);
+        assert_eq!(bytes.len(), 24);
+    }
+
+    #[test]
     fn full_player_values_update_block_matches_cpp_playerdata_visible_item_delta_shape() {
         let mut data = PlayerDataValuesDeltaUpdate::default();
         data.player_data_mask[1] = (1 << 29) | (1 << 30);
@@ -9269,7 +9291,7 @@ mod tests {
             max_health: 500,
             level: 55,
             faction_template: 85,
-            npc_flags: 1, // Gossip flag
+            npc_flags: 0x1_0000_0001, // Gossip flag plus NPCFlags2 bit 0
             unit_flags: 32768,
             unit_flags2: 2048,
             unit_flags3: 0,
@@ -9296,16 +9318,13 @@ mod tests {
         // Search for this pattern preceded by DisplayId (4500 = 0x94110000 LE).
         let display_le = 4500u32.to_le_bytes();
         let npc_le = 1u32.to_le_bytes();
+        let npc2_le = 1u32.to_le_bytes();
         let mut found = false;
         for i in 0..bytes.len().saturating_sub(8) {
             if bytes[i..i + 4] == display_le && bytes[i + 4..i + 8] == npc_le {
                 found = true;
-                // Also check NpcFlags[1] = 0
-                assert_eq!(
-                    bytes[i + 8..i + 12],
-                    [0, 0, 0, 0],
-                    "NpcFlags[1] should be 0"
-                );
+                // Also check NpcFlags[1] = 1
+                assert_eq!(bytes[i + 8..i + 12], npc2_le, "NpcFlags[1] should be 1");
                 break;
             }
         }

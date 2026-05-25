@@ -743,7 +743,9 @@ impl WorldCreature {
         Self::from_canonical(creature, create_data)
     }
 
-    pub fn from_canonical(creature: Creature, create_data: CreatureCreateData) -> Self {
+    pub fn from_canonical(creature: Creature, mut create_data: CreatureCreateData) -> Self {
+        let ai = creature.ai_ownership();
+        create_data.npc_flags = (u64::from(ai.npc_flags2) << 32) | u64::from(ai.npc_flags);
         Self {
             creature,
             create_data,
@@ -805,6 +807,14 @@ impl WorldCreature {
 
     pub fn npc_flags(&self) -> u32 {
         self.creature.ai_ownership().npc_flags
+    }
+
+    pub fn npc_flags2(&self) -> u32 {
+        self.creature.ai_ownership().npc_flags2
+    }
+
+    pub fn npc_flags_mask_like_cpp(&self) -> u64 {
+        (u64::from(self.npc_flags2()) << 32) | u64::from(self.npc_flags())
     }
 
     pub fn unit_flags(&self) -> u32 {
@@ -3600,6 +3610,35 @@ mod tests {
             unfiltered.iter().map(WorldCreature::guid).collect();
         assert!(unfiltered_guids.contains(&visible_guid));
         assert!(unfiltered_guids.contains(&hidden_guid));
+    }
+
+    #[test]
+    fn world_creature_create_bridge_preserves_npc_flags2_like_cpp() {
+        let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 102);
+        let mut creature = WorldCreature::new(
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0x40,
+            0,
+        );
+        creature
+            .creature
+            .set_npc_flags2_runtime_like_cpp(0x0000_0001);
+
+        let bridged = WorldCreature::from_canonical(creature.creature, creature.create_data);
+
+        assert_eq!(bridged.npc_flags(), 0x40);
+        assert_eq!(bridged.npc_flags2(), 0x1);
+        assert_eq!(bridged.npc_flags_mask_like_cpp(), 0x1_0000_0040);
+        assert_eq!(bridged.create_data.npc_flags, 0x1_0000_0040);
     }
 
     fn unique_test_dir(name: &str) -> std::path::PathBuf {

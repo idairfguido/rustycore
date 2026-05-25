@@ -3093,6 +3093,7 @@ impl WorldSession {
                 create_data.health = i64::from(creature.current_hp());
                 create_data.max_health = i64::from(creature.max_hp());
                 create_data.level = creature.level();
+                create_data.npc_flags = creature.npc_flags_mask_like_cpp();
                 create_data.zone_id = zone_id;
                 blocks.push(UpdateObject::create_creature_block(
                     create_data,
@@ -3394,6 +3395,7 @@ impl WorldSession {
                     create_data.health = i64::from(creature.current_hp());
                     create_data.max_health = i64::from(creature.max_hp());
                     create_data.level = creature.level();
+                    create_data.npc_flags = creature.npc_flags_mask_like_cpp();
                     new_creature_blocks.push(UpdateObject::create_creature_block(
                         create_data,
                         &creature.position(),

@@ -195,7 +195,7 @@ pub struct GameEventNpcFlagLiveOutcomeLikeCpp {
     pub live_creatures_mutated: usize,
     pub stale_index_or_wrong_kind: usize,
     pub npc_flags_low_applied: usize,
-    pub npc_flags2_unrepresented_nonzero: usize,
+    pub npc_flags2_applied: usize,
 }
 
 /// Represented key for the map-owned C++ `_dynamicTree` model-registration seam.
@@ -7859,10 +7859,10 @@ where
 
     /// Bounded map-owned consumer for C++ `GameEventMgr::UpdateEventNPCFlags` live creature loop.
     ///
-    /// Mirrors `Map::GetCreatureBySpawnIdStore().equal_range(spawnId)` and only applies the
-    /// represented low 32-bit `ReplaceAllNpcFlags` state to canonical `MapObjectRecord::Creature`.
-    /// `NPCFlags2` high bits are evidence-only in this slice; no values/session fanout, gossip reset,
-    /// ObjectAccessor, update packets, or template lookup is performed inside `wow-map`.
+    /// Mirrors `Map::GetCreatureBySpawnIdStore().equal_range(spawnId)` and applies represented
+    /// `ReplaceAllNpcFlags` plus `ReplaceAllNpcFlags2` state to canonical `MapObjectRecord::Creature`.
+    /// No values/session fanout, gossip reset, ObjectAccessor, update packets, or template lookup is
+    /// performed inside `wow-map`.
     pub fn update_game_event_npc_flags_by_spawn_id_like_cpp(
         &mut self,
         spawn_id: SpawnId,
@@ -7875,7 +7875,7 @@ where
             ..GameEventNpcFlagLiveOutcomeLikeCpp::default()
         };
         let npc_flags_low = npcflag_mask_with_template as u32;
-        let npc_flags2_nonzero = (npcflag_mask_with_template >> 32) != 0;
+        let npc_flags2 = (npcflag_mask_with_template >> 32) as u32;
 
         for guid in guids {
             let Some(record) = self.map_objects.get_mut(&guid) else {
@@ -7892,11 +7892,12 @@ where
             }
 
             creature.ai_ownership_mut().npc_flags = npc_flags_low;
+            creature.ai_ownership_mut().npc_flags2 = npc_flags2;
+            creature.unit_mut().set_npc_flags_like_cpp(npc_flags_low);
+            creature.unit_mut().set_npc_flags2_like_cpp(npc_flags2);
             outcome.live_creatures_mutated += 1;
             outcome.npc_flags_low_applied += 1;
-            if npc_flags2_nonzero {
-                outcome.npc_flags2_unrepresented_nonzero += 1;
-            }
+            outcome.npc_flags2_applied += 1;
         }
 
         outcome
@@ -17504,13 +17505,33 @@ mod tests {
         assert_eq!(outcome.indexed_guids, 2);
         assert_eq!(outcome.live_creatures_mutated, 2);
         assert_eq!(outcome.npc_flags_low_applied, 2);
-        assert_eq!(outcome.npc_flags2_unrepresented_nonzero, 2);
+        assert_eq!(outcome.npc_flags2_applied, 2);
         for guid in map.creature_spawn_id_store_guids_like_cpp(547) {
             let creature = map
                 .map_object_record(guid)
                 .and_then(MapObjectRecord::creature)
                 .unwrap();
             assert_eq!(creature.ai_ownership().npc_flags, 0xA5);
+            assert_eq!(creature.ai_ownership().npc_flags2, 0x1);
+            assert_eq!(creature.unit().data().npc_flags, [0xA5, 0x1]);
+            assert!(
+                creature
+                    .unit()
+                    .unit_data_changes_mask()
+                    .is_set(wow_entities::UNIT_DATA_NPC_FLAGS_PARENT_BIT)
+            );
+            assert!(
+                creature
+                    .unit()
+                    .unit_data_changes_mask()
+                    .is_set(wow_entities::UNIT_DATA_NPC_FLAGS_FIRST_BIT)
+            );
+            assert!(
+                creature
+                    .unit()
+                    .unit_data_changes_mask()
+                    .is_set(wow_entities::UNIT_DATA_NPC_FLAGS_FIRST_BIT + 1)
+            );
         }
     }
 
@@ -17540,10 +17561,11 @@ mod tests {
             .and_then(MapObjectRecord::creature)
             .unwrap();
         assert_eq!(creature.ai_ownership().npc_flags, 0x11);
+        assert_eq!(creature.ai_ownership().npc_flags2, 0);
     }
 
     #[test]
-    fn game_event_npc_flag_live_consumer_upper_bits_are_evidence_only_like_cpp() {
+    fn game_event_npc_flag_live_consumer_applies_upper_bits_like_cpp() {
         let mut map = test_map();
         map.insert_map_object_record(
             MapObjectRecord::new_creature(test_creature_for_spawn(550, 55001, true)).unwrap(),
@@ -17555,13 +17577,15 @@ mod tests {
 
         assert_eq!(outcome.live_creatures_mutated, 1);
         assert_eq!(outcome.npc_flags_low_applied, 1);
-        assert_eq!(outcome.npc_flags2_unrepresented_nonzero, 1);
+        assert_eq!(outcome.npc_flags2_applied, 1);
         let guid = map.creature_spawn_id_store_guids_like_cpp(550)[0];
         let creature = map
             .map_object_record(guid)
             .and_then(MapObjectRecord::creature)
             .unwrap();
         assert_eq!(creature.ai_ownership().npc_flags, 0x40);
+        assert_eq!(creature.ai_ownership().npc_flags2, 0xFFFF_FFFF);
+        assert_eq!(creature.unit().data().npc_flags, [0x40, 0xFFFF_FFFF]);
     }
 
     #[test]

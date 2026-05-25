@@ -1810,8 +1810,8 @@ async fn main() -> Result<()> {
             update_npc_flags_maps_matched = side_effect_summary.update_npc_flags_maps_matched,
             update_npc_flags_live_creatures_mutated =
                 side_effect_summary.update_npc_flags_live_creatures_mutated,
-            update_npc_flags2_unrepresented_nonzero =
-                side_effect_summary.update_npc_flags2_unrepresented_nonzero,
+            update_npc_flags2_applied =
+                side_effect_summary.update_npc_flags2_applied,
             update_npc_vendor_actions = side_effect_summary.update_npc_vendor_actions,
             update_npc_vendor_records_seen = side_effect_summary.update_npc_vendor_records_seen,
             update_npc_vendor_items_added = side_effect_summary.update_npc_vendor_items_added,
@@ -4011,7 +4011,7 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     update_npc_flags_live_creatures_mutated: usize,
     update_npc_flags_stale_index_or_wrong_kind: usize,
     update_npc_flags_low_applied: usize,
-    update_npc_flags2_unrepresented_nonzero: usize,
+    update_npc_flags2_applied: usize,
     update_npc_vendor_actions: usize,
     update_npc_vendor_records_seen: usize,
     update_npc_vendor_items_added: usize,
@@ -4397,8 +4397,7 @@ fn game_event_update_npc_flags_like_cpp(
                 summary.update_npc_flags_stale_index_or_wrong_kind +=
                     outcome.stale_index_or_wrong_kind;
                 summary.update_npc_flags_low_applied += outcome.npc_flags_low_applied;
-                summary.update_npc_flags2_unrepresented_nonzero +=
-                    outcome.npc_flags2_unrepresented_nonzero;
+                summary.update_npc_flags2_applied += outcome.npc_flags2_applied;
             }
         });
         summary.update_npc_flags_maps_matched += maps_matched_for_record;
@@ -4824,8 +4823,7 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                     npc_flag_summary.update_npc_flags_stale_index_or_wrong_kind;
                 summary.update_npc_flags_low_applied +=
                     npc_flag_summary.update_npc_flags_low_applied;
-                summary.update_npc_flags2_unrepresented_nonzero +=
-                    npc_flag_summary.update_npc_flags2_unrepresented_nonzero;
+                summary.update_npc_flags2_applied += npc_flag_summary.update_npc_flags2_applied;
             }
             GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor { event_id, activate } => {
                 let npc_vendor_summary = game_event_update_npc_vendor_like_cpp(
@@ -6271,8 +6269,8 @@ fn spawn_canonical_map_update_loop(
                         side_effect_summary.update_npc_flags_maps_matched,
                     update_npc_flags_live_creatures_mutated =
                         side_effect_summary.update_npc_flags_live_creatures_mutated,
-                    update_npc_flags2_unrepresented_nonzero =
-                        side_effect_summary.update_npc_flags2_unrepresented_nonzero,
+                    update_npc_flags2_applied =
+                        side_effect_summary.update_npc_flags2_applied,
                     update_npc_vendor_actions = side_effect_summary.update_npc_vendor_actions,
                     update_npc_vendor_records_seen =
                         side_effect_summary.update_npc_vendor_records_seen,
@@ -11913,6 +11911,21 @@ mmap.enablePathFinding = 0
             .npc_flags
     }
 
+    fn live_npc_flags2_like_cpp(
+        manager: &wow_map::MapManager,
+        map_id: u32,
+        spawn_id: wow_map::SpawnId,
+    ) -> u32 {
+        manager
+            .find_map(map_id, 0)
+            .expect("test map")
+            .map()
+            .get_creature_by_spawn_id_like_cpp(spawn_id)
+            .expect("test live creature")
+            .ai_ownership()
+            .npc_flags2
+    }
+
     #[test]
     fn game_event_npc_flag_live_activation_applies_active_overlay_without_template_base_like_cpp() {
         let mut manager = wow_map::MapManager::default();
@@ -11951,8 +11964,9 @@ mmap.enablePathFinding = 0
         assert_eq!(summary.update_npc_flags_maps_matched, 1);
         assert_eq!(summary.update_npc_flags_live_creatures_mutated, 1);
         assert_eq!(summary.update_npc_flags_low_applied, 1);
-        assert_eq!(summary.update_npc_flags2_unrepresented_nonzero, 1);
+        assert_eq!(summary.update_npc_flags2_applied, 1);
         assert_eq!(live_npc_flags_like_cpp(&manager, 1, spawn_id), 0x60);
+        assert_eq!(live_npc_flags2_like_cpp(&manager, 1, spawn_id), 0x1);
     }
 
     #[test]

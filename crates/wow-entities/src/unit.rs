@@ -50,6 +50,8 @@ pub const UNIT_DATA_RACE_BIT: usize = 24;
 pub const UNIT_DATA_CLASS_ID_BIT: usize = 25;
 pub const UNIT_DATA_PLAYER_CLASS_ID_BIT: usize = 26;
 pub const UNIT_DATA_SEX_BIT: usize = 27;
+pub const UNIT_DATA_NPC_FLAGS_PARENT_BIT: usize = 113;
+pub const UNIT_DATA_NPC_FLAGS_FIRST_BIT: usize = 114;
 pub const UNIT_DATA_POWER_PARENT_BIT: usize = 116;
 pub const UNIT_DATA_POWER_FIRST_BIT: usize = 137;
 pub const UNIT_DATA_MAX_POWER_FIRST_BIT: usize = 147;
@@ -83,6 +85,7 @@ pub struct UnitDataValues {
     pub mount_display_id: i32,
     pub stand_state: u8,
     pub pvp_flags: u8,
+    pub npc_flags: [u32; 2],
     pub power: [i32; MAX_POWERS_PER_CLASS],
     pub max_power: [i32; MAX_POWERS_PER_CLASS],
     pub virtual_items: [VisibleItemValues; MAX_ATTACK],
@@ -113,6 +116,7 @@ impl Default for UnitDataValues {
             mount_display_id: 0,
             stand_state: UnitStandStateType::Stand as u8,
             pvp_flags: 0,
+            npc_flags: [0; 2],
             power: [0; MAX_POWERS_PER_CLASS],
             max_power: [0; MAX_POWERS_PER_CLASS],
             virtual_items: [VisibleItemValues::default(); MAX_ATTACK],
@@ -1436,6 +1440,32 @@ impl Unit {
 
     pub fn unit_flags2_like_cpp(&self) -> UnitFlags2 {
         UnitFlags2::from_bits_truncate(self.data.flags2)
+    }
+
+    pub fn set_npc_flags_like_cpp(&mut self, flags: u32) {
+        self.set_npc_flags_index_like_cpp(0, flags);
+    }
+
+    pub fn set_npc_flags2_like_cpp(&mut self, flags: u32) {
+        self.set_npc_flags_index_like_cpp(1, flags);
+    }
+
+    pub const fn npc_flags_like_cpp(&self) -> [u32; 2] {
+        self.data.npc_flags
+    }
+
+    fn set_npc_flags_index_like_cpp(&mut self, index: usize, flags: u32) {
+        if index >= self.data.npc_flags.len() {
+            return;
+        }
+        if self.data.npc_flags[index] != flags {
+            self.data.npc_flags[index] = flags;
+            self.mark_unit_data_array(
+                UNIT_DATA_NPC_FLAGS_PARENT_BIT,
+                UNIT_DATA_NPC_FLAGS_FIRST_BIT,
+                index,
+            );
+        }
     }
 
     pub fn set_race(&mut self, race: u8) {
@@ -3177,6 +3207,29 @@ mod tests {
         assert!(unit.is_stand_state_like_cpp());
         unit.set_stand_state_like_cpp(UnitStandStateType::Submerged);
         assert!(unit.is_stand_state_like_cpp());
+    }
+
+    #[test]
+    fn npc_flags_setters_mark_cpp_parent_and_element_bits() {
+        let mut unit = Unit::new(true);
+        unit.clear_unit_data_changes();
+
+        unit.set_npc_flags_like_cpp(0x40);
+        unit.set_npc_flags2_like_cpp(0x1);
+
+        assert_eq!(unit.npc_flags_like_cpp(), [0x40, 0x1]);
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_NPC_FLAGS_PARENT_BIT)
+        );
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_NPC_FLAGS_FIRST_BIT)
+        );
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_NPC_FLAGS_FIRST_BIT + 1)
+        );
     }
 
     #[test]

@@ -4462,6 +4462,7 @@ impl WorldSession {
         let display_id = create_data.display_id;
         let faction = create_data.faction_template.max(0) as u32;
         let npc_flags = create_data.npc_flags as u32;
+        let npc_flags2 = (create_data.npc_flags >> 32) as u32;
         let unit_flags = create_data.unit_flags;
         let (db_phase_shift, validated_terrain_swap_map) = self.db_spawn_phase_shift_like_cpp(
             map_id,
@@ -4488,6 +4489,7 @@ impl WorldSession {
             creature.unit_mut().set_max_health(u64::from(hp));
             creature.unit_mut().set_health(u64::from(hp));
             creature.set_ai_identity_runtime(display_id, faction, npc_flags, unit_flags);
+            creature.set_npc_flags2_runtime_like_cpp(npc_flags2);
             creature.configure_ai_runtime(position, aggro_radius, 5.0, 30);
             creature.ai_ownership_mut().min_damage = min_dmg;
             creature.ai_ownership_mut().max_damage = max_dmg;
@@ -19312,7 +19314,7 @@ impl WorldSession {
                         max_health: c.max_hp() as i64,
                         level: c.level(),
                         faction_template: c.faction() as i32,
-                        npc_flags: c.npc_flags() as u64,
+                        npc_flags: c.npc_flags_mask_like_cpp(),
                         unit_flags: c.unit_flags(),
                         unit_flags2: 0,
                         unit_flags3: 0,

@@ -1319,12 +1319,14 @@ impl Creature {
         self.ai_ownership.faction = faction;
         self.ai_ownership.npc_flags = npc_flags;
         self.ai_ownership.unit_flags = unit_flags;
+        self.unit.set_npc_flags_like_cpp(npc_flags);
         self.set_display_id(display_id, true, None);
         self.set_faction(faction);
     }
 
     pub fn set_npc_flags2_runtime_like_cpp(&mut self, npc_flags2: u32) {
         self.ai_ownership.npc_flags2 = npc_flags2;
+        self.unit.set_npc_flags2_like_cpp(npc_flags2);
     }
 
     pub fn configure_ai_runtime(

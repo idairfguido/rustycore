@@ -367,6 +367,7 @@ fn unit_data_update_to_packet(update: &UnitDataUpdate) -> UnitDataValuesDeltaUpd
     packet_update.flags = update.values.flags;
     packet_update.flags2 = update.values.flags2;
     packet_update.flags3 = update.values.flags3;
+    packet_update.npc_flags = update.values.npc_flags;
     packet_update.bounding_radius = update.values.bounding_radius;
     packet_update.combat_reach = update.values.combat_reach;
     packet_update.display_scale = update.values.display_scale;
@@ -1037,6 +1038,8 @@ mod tests {
         unit.set_health(123);
         unit.set_stand_state_like_cpp(wow_constants::UnitStandStateType::Sit);
         unit.set_pvp_flag_like_cpp(wow_constants::UnitPvpFlags::PVP);
+        unit.set_npc_flags_like_cpp(0x40);
+        unit.set_npc_flags2_like_cpp(0x1);
 
         let update = unit.values_update();
         let packet_update = unit_values_update_to_packet(&update).unwrap();
@@ -1062,7 +1065,20 @@ mod tests {
             &packet_update.unit_data_mask,
             wow_entities::UNIT_DATA_PVP_FLAGS_BIT
         ));
+        assert!(mask_has(
+            &packet_update.unit_data_mask,
+            wow_entities::UNIT_DATA_NPC_FLAGS_PARENT_BIT
+        ));
+        assert!(mask_has(
+            &packet_update.unit_data_mask,
+            wow_entities::UNIT_DATA_NPC_FLAGS_FIRST_BIT
+        ));
+        assert!(mask_has(
+            &packet_update.unit_data_mask,
+            wow_entities::UNIT_DATA_NPC_FLAGS_FIRST_BIT + 1
+        ));
         assert_eq!(packet_update.health, 123);
+        assert_eq!(packet_update.npc_flags, [0x40, 0x1]);
         assert_eq!(
             packet_update.stand_state,
             wow_constants::UnitStandStateType::Sit as u8
