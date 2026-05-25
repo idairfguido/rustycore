@@ -48,9 +48,9 @@ use wow_entities::{
     LineOfSightQuery, LootState, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
     ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player, SceneObject,
     TransportUpdateLikeCpp, Unit, UnitAddToWorldOutcomeLikeCpp, UnitRemoveFromWorldOutcomeLikeCpp,
-    UnitSharedVisionSetWorldObjectRequestLikeCpp, VehicleKitAddToWorldResetOutcomeLikeCpp,
-    VehicleKitInstallOutcomeLikeCpp, VehicleKitRemoveOutcomeLikeCpp, WorldObject,
-    WorldObjectEnvironment, WorldObjectHeightQuery,
+    UnitSharedVisionSetWorldObjectRequestLikeCpp, UnitValuesUpdate,
+    VehicleKitAddToWorldResetOutcomeLikeCpp, VehicleKitInstallOutcomeLikeCpp,
+    VehicleKitRemoveOutcomeLikeCpp, WorldObject, WorldObjectEnvironment, WorldObjectHeightQuery,
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
@@ -188,7 +188,14 @@ pub struct GameEventChangeEquipOrModelLiveOutcomeLikeCpp {
     pub model_validation_unavailable: usize,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameEventNpcFlagValuesUpdateLikeCpp {
+    pub guid: ObjectGuid,
+    pub map_id: u32,
+    pub values_update: UnitValuesUpdate,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GameEventNpcFlagLiveOutcomeLikeCpp {
     pub spawn_id: SpawnId,
     pub indexed_guids: usize,
@@ -196,6 +203,7 @@ pub struct GameEventNpcFlagLiveOutcomeLikeCpp {
     pub stale_index_or_wrong_kind: usize,
     pub npc_flags_low_applied: usize,
     pub npc_flags2_applied: usize,
+    pub values_updates: Vec<GameEventNpcFlagValuesUpdateLikeCpp>,
 }
 
 /// Represented key for the map-owned C++ `_dynamicTree` model-registration seam.
@@ -7895,6 +7903,16 @@ where
             creature.ai_ownership_mut().npc_flags2 = npc_flags2;
             creature.unit_mut().set_npc_flags_like_cpp(npc_flags_low);
             creature.unit_mut().set_npc_flags2_like_cpp(npc_flags2);
+            let values_update = creature.unit().values_update();
+            if values_update.has_data() {
+                outcome
+                    .values_updates
+                    .push(GameEventNpcFlagValuesUpdateLikeCpp {
+                        guid,
+                        map_id: self.map_id,
+                        values_update,
+                    });
+            }
             outcome.live_creatures_mutated += 1;
             outcome.npc_flags_low_applied += 1;
             outcome.npc_flags2_applied += 1;

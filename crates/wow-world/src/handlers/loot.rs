@@ -2504,6 +2504,9 @@ impl WorldSession {
                         command.event_start_time,
                     );
                 }
+                SessionCommand::SendVisibleObjectValuesUpdate(command) => {
+                    self.handle_send_visible_object_values_update_command_like_cpp(command);
+                }
                 SessionCommand::SetQuestSharingInfoAndSendDetails(command) => {
                     self.handle_set_quest_sharing_info_and_send_details_command_like_cpp(command);
                 }
@@ -2512,6 +2515,26 @@ impl WorldSession {
                 }
             }
         }
+    }
+
+    fn handle_send_visible_object_values_update_command_like_cpp(
+        &mut self,
+        command: wow_network::player_registry::SendVisibleObjectValuesUpdateCommand,
+    ) {
+        if self.state() != crate::session::SessionState::LoggedIn {
+            return;
+        }
+        if self.player_map_id_like_cpp() != command.map_id {
+            return;
+        }
+        if !self
+            .client_visible_guids_like_cpp
+            .contains(&command.object_guid)
+        {
+            return;
+        }
+
+        self.send_raw_packet(&command.packet_bytes);
     }
 
     fn handle_send_repeatable_turn_in_request_items_command_like_cpp(
