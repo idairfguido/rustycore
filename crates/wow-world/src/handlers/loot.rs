@@ -590,6 +590,7 @@ impl WorldSession {
         state.chest_restock_time_secs = Some(source.chest_restock_time_secs);
         state.chest_consumable = Some(source.chest_consumable);
         state.despawn_at_action = source.chest_consumable;
+        state.chest_loot_source = Some(source);
         state.chest_personal_loot_id = Some(source.personal_loot_id);
         state.linked_trap_entry =
             (source.linked_trap_entry != 0).then_some(source.linked_trap_entry);
@@ -611,6 +612,7 @@ impl WorldSession {
             if is_first_represented_use {
                 state.personal_loot_uses = state.personal_loot_uses.saturating_add(1);
             }
+            state.gathering_node_loot_id = Some(source.loot_id);
             if state.personal_loot_uses >= source.max_loots {
                 state.go_state = Some(GoState::Active);
                 state.dynamic_flags |= GO_DYNFLAG_LO_NO_INTERACT;

@@ -996,6 +996,27 @@ impl LootStore {
         ids
     }
 
+    #[must_use]
+    pub fn have_quest_loot_for_like_cpp(&self, loot_id: u32, stores: &LootStores) -> bool {
+        self.get_loot_for(loot_id)
+            .is_some_and(|template| template.has_quest_drop_like_cpp(stores, 0, &mut |_| true))
+    }
+
+    #[must_use]
+    pub fn have_quest_loot_for_player_like_cpp<F>(
+        &self,
+        loot_id: u32,
+        stores: &LootStores,
+        mut player_has_quest_for_item: F,
+    ) -> bool
+    where
+        F: FnMut(u32) -> bool,
+    {
+        self.get_loot_for(loot_id).is_some_and(|template| {
+            template.has_quest_drop_for_player_like_cpp(stores, 0, &mut player_has_quest_for_item)
+        })
+    }
+
     pub fn fill_loot_like_cpp<R, FTemplate, FRate, FAllowed, FRandom>(
         &self,
         loot_id: u32,
@@ -1273,6 +1294,89 @@ impl LootTemplate {
         for group in &self.groups {
             group.append_condition_ids_for_fill_like_cpp(store_kind, entry, ids);
         }
+    }
+
+    fn has_quest_drop_like_cpp<F>(
+        &self,
+        stores: &LootStores,
+        group_id: u8,
+        player_has_quest_for_item: &mut F,
+    ) -> bool
+    where
+        F: FnMut(u32) -> bool,
+    {
+        if group_id > 0 {
+            let index = usize::from(group_id - 1);
+            return self
+                .groups
+                .get(index)
+                .is_some_and(|group| group.has_quest_drop_like_cpp(player_has_quest_for_item));
+        }
+
+        for item in &self.entries {
+            if item.reference > 0 {
+                let Some(reference_store) = stores.get(&LootStoreKind::Reference) else {
+                    continue;
+                };
+                let Some(reference_template) = reference_store.get_loot_for(item.reference) else {
+                    continue;
+                };
+                if reference_template.has_quest_drop_like_cpp(
+                    stores,
+                    item.group_id,
+                    player_has_quest_for_item,
+                ) {
+                    return true;
+                }
+            } else if item.needs_quest {
+                return true;
+            }
+        }
+
+        self.groups
+            .iter()
+            .any(|group| group.has_quest_drop_like_cpp(player_has_quest_for_item))
+    }
+
+    fn has_quest_drop_for_player_like_cpp<F>(
+        &self,
+        stores: &LootStores,
+        group_id: u8,
+        player_has_quest_for_item: &mut F,
+    ) -> bool
+    where
+        F: FnMut(u32) -> bool,
+    {
+        if group_id > 0 {
+            let index = usize::from(group_id - 1);
+            return self.groups.get(index).is_some_and(|group| {
+                group.has_quest_drop_for_player_like_cpp(player_has_quest_for_item)
+            });
+        }
+
+        for item in &self.entries {
+            if item.reference > 0 {
+                let Some(reference_store) = stores.get(&LootStoreKind::Reference) else {
+                    continue;
+                };
+                let Some(reference_template) = reference_store.get_loot_for(item.reference) else {
+                    continue;
+                };
+                if reference_template.has_quest_drop_for_player_like_cpp(
+                    stores,
+                    item.group_id,
+                    player_has_quest_for_item,
+                ) {
+                    return true;
+                }
+            } else if player_has_quest_for_item(item.item_id) {
+                return true;
+            }
+        }
+
+        self.groups
+            .iter()
+            .any(|group| group.has_quest_drop_for_player_like_cpp(player_has_quest_for_item))
     }
 
     fn process_like_cpp<R, FTemplate, FRate, FAllowed, FRandom>(
@@ -1704,6 +1808,26 @@ impl LootGroup {
     #[must_use]
     pub fn equal_chanced(&self) -> &[LootStoreItem] {
         &self.equal_chanced
+    }
+
+    fn has_quest_drop_like_cpp<F>(&self, player_has_quest_for_item: &mut F) -> bool
+    where
+        F: FnMut(u32) -> bool,
+    {
+        self.explicitly_chanced
+            .iter()
+            .chain(self.equal_chanced.iter())
+            .any(|item| item.needs_quest && player_has_quest_for_item(item.item_id))
+    }
+
+    fn has_quest_drop_for_player_like_cpp<F>(&self, player_has_quest_for_item: &mut F) -> bool
+    where
+        F: FnMut(u32) -> bool,
+    {
+        self.explicitly_chanced
+            .iter()
+            .chain(self.equal_chanced.iter())
+            .any(|item| player_has_quest_for_item(item.item_id))
     }
 
     pub fn roll_like_cpp<R, F>(
@@ -3564,5 +3688,39 @@ mod tests {
             ),
             Some(LOOT_SLOT_TYPE_OWNER_LIKE_CPP)
         );
+    }
+
+    #[test]
+    fn have_quest_loot_follows_reference_templates_like_cpp() {
+        let mut gameobject_store = LootStore::for_kind_like_cpp(LootStoreKind::Gameobject);
+        gameobject_store
+            .load_rows_like_cpp(
+                [LootTemplateRow {
+                    entry: 700,
+                    item: item(701, 701, 100.0, 0),
+                }],
+                |_| true,
+            )
+            .unwrap();
+        let mut quest_item = item(9001, 0, 100.0, 0);
+        quest_item.needs_quest = true;
+        let mut reference_store = LootStore::for_kind_like_cpp(LootStoreKind::Reference);
+        reference_store
+            .load_rows_like_cpp(
+                [LootTemplateRow {
+                    entry: 701,
+                    item: quest_item,
+                }],
+                |_| true,
+            )
+            .unwrap();
+        let mut stores = LootStores::new();
+        stores.insert(LootStoreKind::Gameobject, gameobject_store);
+        stores.insert(LootStoreKind::Reference, reference_store);
+        let store = stores.get(&LootStoreKind::Gameobject).unwrap();
+
+        assert!(store.have_quest_loot_for_like_cpp(700, &stores));
+        assert!(store.have_quest_loot_for_player_like_cpp(700, &stores, |item_id| item_id == 9001));
+        assert!(!store.have_quest_loot_for_player_like_cpp(700, &stores, |item_id| item_id == 42));
     }
 }

@@ -1322,6 +1322,10 @@ impl crate::session::WorldSession {
         }
 
         let template = GameObjectTemplateData::new(go_type, data);
+        self.record_represented_gameobject_template_quest_source_like_cpp(
+            gameobject_guid,
+            &template,
+        );
         let icon_name: String = result.read_string(4);
         if icon_name == "Point" {
             return;

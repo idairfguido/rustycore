@@ -1029,7 +1029,9 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub chest_restock_time_secs: Option<u32>,
     pub chest_restock_until: Option<Instant>,
     pub chest_consumable: Option<bool>,
+    pub chest_loot_source: Option<wow_entities::GameObjectLootSource>,
     pub chest_personal_loot_id: Option<u32>,
+    pub gathering_node_loot_id: Option<u32>,
     pub map_id: Option<u16>,
     pub zone_id: Option<u32>,
     pub area_id: Option<u32>,
@@ -1285,7 +1287,9 @@ impl Default for RepresentedGameObjectUseState {
             chest_restock_time_secs: None,
             chest_restock_until: None,
             chest_consumable: None,
+            chest_loot_source: None,
             chest_personal_loot_id: None,
+            gathering_node_loot_id: None,
             map_id: None,
             zone_id: None,
             area_id: None,
@@ -5132,6 +5136,168 @@ impl WorldSession {
         })
     }
 
+    pub(crate) fn record_represented_gameobject_template_quest_source_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        template: &wow_entities::GameObjectTemplateData,
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(guid)
+            .or_default();
+        if let Some(source) = template.chest_loot_source_like_cpp() {
+            state.chest_loot_source = Some(source);
+        }
+        if let Some(source) = template.gathering_node_use_source_like_cpp() {
+            state.gathering_node_loot_id = Some(source.loot_id);
+        }
+    }
+
+    fn represented_gameobject_loot_ids_have_quest_loot_like_cpp(
+        &self,
+        loot_ids: impl IntoIterator<Item = u32>,
+    ) -> bool {
+        let Some(stores) = self.loot_stores.as_ref() else {
+            return false;
+        };
+        let Some(store) = stores.get(&LootStoreKind::Gameobject) else {
+            return false;
+        };
+        loot_ids
+            .into_iter()
+            .filter(|id| *id != 0)
+            .any(|loot_id| store.have_quest_loot_for_like_cpp(loot_id, stores.as_ref()))
+    }
+
+    fn represented_gameobject_loot_ids_have_quest_loot_for_player_like_cpp(
+        &self,
+        loot_ids: impl IntoIterator<Item = u32>,
+    ) -> bool {
+        let Some(stores) = self.loot_stores.as_ref() else {
+            return false;
+        };
+        let Some(store) = stores.get(&LootStoreKind::Gameobject) else {
+            return false;
+        };
+        loot_ids.into_iter().filter(|id| *id != 0).any(|loot_id| {
+            store.have_quest_loot_for_player_like_cpp(loot_id, stores.as_ref(), |item_id| {
+                self.represented_player_has_quest_for_loot_item_like_cpp(item_id)
+            })
+        })
+    }
+
+    fn represented_gameobject_chest_loot_ids_like_cpp(
+        source: wow_entities::GameObjectLootSource,
+    ) -> [u32; 3] {
+        [source.loot_id, source.personal_loot_id, source.push_loot_id]
+    }
+
+    fn represented_player_has_quest_for_loot_item_like_cpp(&self, item_id: u32) -> bool {
+        self.represented_current_player_has_incomplete_quest_objective_for_item_like_cpp(item_id)
+            || self
+                .item_template_addon_quest_log_item_id_like_cpp(item_id)
+                .is_some_and(|quest_log_item_id| {
+                    quest_log_item_id != 0
+                        && self
+                            .represented_current_player_has_incomplete_quest_objective_for_object_id_like_cpp(
+                            i32::try_from(quest_log_item_id).unwrap_or(i32::MAX),
+                        )
+                })
+            || self.represented_current_player_has_incomplete_quest_item_drop_for_item_like_cpp(item_id)
+    }
+
+    fn represented_current_player_has_incomplete_quest_objective_for_item_like_cpp(
+        &self,
+        item_id: u32,
+    ) -> bool {
+        let Ok(item_object_id) = i32::try_from(item_id) else {
+            return false;
+        };
+        self.represented_current_player_has_incomplete_quest_objective_for_object_id_like_cpp(
+            item_object_id,
+        )
+    }
+
+    fn represented_current_player_has_incomplete_quest_objective_for_object_id_like_cpp(
+        &self,
+        object_id: i32,
+    ) -> bool {
+        let Some(quest_store) = self.quest_store.as_ref() else {
+            return false;
+        };
+        self.player_quests.values().any(|status| {
+            if status.status != crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP {
+                return false;
+            }
+            let Some(quest) = quest_store.get(status.quest_id) else {
+                return false;
+            };
+            quest
+                .objectives
+                .iter()
+                .enumerate()
+                .any(|(fallback_index, objective)| {
+                    if objective.obj_type != QUEST_OBJECTIVE_ITEM_LIKE_CPP
+                        || objective.object_id != object_id
+                    {
+                        return false;
+                    }
+                    let storage_index = usize::try_from(objective.storage_index)
+                        .ok()
+                        .unwrap_or(fallback_index);
+                    let current = status
+                        .objective_counts
+                        .get(storage_index)
+                        .copied()
+                        .unwrap_or(0);
+                    current < objective.amount.max(1)
+                })
+        })
+    }
+
+    fn represented_current_player_has_incomplete_quest_item_drop_for_item_like_cpp(
+        &self,
+        item_id: u32,
+    ) -> bool {
+        let Some(quest_store) = self.quest_store.as_ref() else {
+            return false;
+        };
+        self.player_quests.values().any(|status| {
+            if status.status != crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP {
+                return false;
+            }
+            let Some(quest) = quest_store.get(status.quest_id) else {
+                return false;
+            };
+            quest
+                .item_drop
+                .iter()
+                .enumerate()
+                .any(|(index, drop_item_id)| {
+                    if *drop_item_id != item_id {
+                        return false;
+                    }
+                    let Some(template) = self.item_storage_template(item_id) else {
+                        return false;
+                    };
+                    let quantity = quest.item_drop_quantity[index];
+                    let mut max_allowed_count = if quantity != 0 {
+                        quantity
+                    } else {
+                        template.max_stack_size
+                    };
+                    if template.max_count > 0 {
+                        max_allowed_count = max_allowed_count.min(template.max_count as u32);
+                    }
+                    self.represented_inventory_item_counts_like_cpp()
+                        .get(&item_id)
+                        .copied()
+                        .unwrap_or(0)
+                        < max_allowed_count
+                })
+        })
+    }
+
     fn represented_gameobject_is_for_quests_like_cpp(
         &self,
         gameobject_entry: u32,
@@ -5141,6 +5307,11 @@ impl WorldSession {
             Some(wow_entities::GAMEOBJECT_TYPE_QUESTGIVER) => true,
             Some(wow_entities::GAMEOBJECT_TYPE_CHEST) => {
                 self.represented_has_quest_for_gameobject_like_cpp(gameobject_entry)
+                    || state.chest_loot_source.is_some_and(|source| {
+                        self.represented_gameobject_loot_ids_have_quest_loot_like_cpp(
+                            Self::represented_gameobject_chest_loot_ids_like_cpp(source),
+                        )
+                    })
             }
             Some(wow_entities::GAMEOBJECT_TYPE_GENERIC) => {
                 self.represented_has_quest_for_gameobject_like_cpp(gameobject_entry)
@@ -5148,7 +5319,10 @@ impl WorldSession {
             Some(wow_entities::GAMEOBJECT_TYPE_GOOBER) => state
                 .goober_use_source
                 .is_some_and(|source| source.quest_id != 0),
-            Some(wow_entities::GAMEOBJECT_TYPE_GATHERING_NODE) => false,
+            Some(wow_entities::GAMEOBJECT_TYPE_GATHERING_NODE) => self
+                .represented_gameobject_loot_ids_have_quest_loot_like_cpp(
+                    state.gathering_node_loot_id,
+                ),
             _ => false,
         }
     }
@@ -5174,10 +5348,14 @@ impl WorldSession {
                 store.gameobject_has_end_quests(gameobject_entry)
                     || store.gameobject_has_start_quests(gameobject_entry)
             }
-            Some(wow_entities::GAMEOBJECT_TYPE_CHEST) => {
-                state.loot_state != Some(wow_entities::LootState::NotReady)
-                    && self.represented_has_quest_for_gameobject_like_cpp(gameobject_entry)
-            }
+            Some(wow_entities::GAMEOBJECT_TYPE_CHEST) => state.loot_state
+                != Some(wow_entities::LootState::NotReady)
+                && (self.represented_has_quest_for_gameobject_like_cpp(gameobject_entry)
+                    || state.chest_loot_source.is_some_and(|source| {
+                        self.represented_gameobject_loot_ids_have_quest_loot_for_player_like_cpp(
+                            Self::represented_gameobject_chest_loot_ids_like_cpp(source),
+                        )
+                    })),
             Some(wow_entities::GAMEOBJECT_TYPE_GENERIC) => {
                 self.represented_has_quest_for_gameobject_like_cpp(gameobject_entry)
             }
@@ -5193,6 +5371,10 @@ impl WorldSession {
                             })
                     })
             }
+            Some(wow_entities::GAMEOBJECT_TYPE_GATHERING_NODE) => self
+                .represented_gameobject_loot_ids_have_quest_loot_for_player_like_cpp(
+                    state.gathering_node_loot_id,
+                ),
             _ => false,
         }
     }
@@ -22286,6 +22468,250 @@ mod tests {
         assert_eq!(session.update_visible_gameobjects_like_cpp(), 1);
         assert_eq!(
             send_rx.try_recv().expect("gameobject dynamic flags update"),
+            expected_gameobject_dynamic_flags_update_like_cpp(
+                gameobject_guid,
+                571,
+                wow_entities::GO_DYNFLAG_LO_ACTIVATE
+                    | wow_entities::GO_DYNFLAG_LO_SPARKLE
+                    | wow_entities::GO_DYNFLAG_LO_HIGHLIGHT
+            )
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn update_visible_gameobjects_sends_dynamic_flags_for_chest_quest_loot_reference_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let go_entry = 8_126;
+        let gameobject_guid = test_gameobject_guid(go_entry, 136);
+        let loot_id = 700;
+        let reference_id = 701;
+        let quest_item_id = 9_001;
+        let quest_id = 12_543;
+        let mut quest = test_quest_template(quest_id);
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_ITEM_LIKE_CPP,
+            order: 0,
+            storage_index: 0,
+            object_id: quest_item_id,
+            amount: 1,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        let mut gameobject_store =
+            wow_loot::LootStore::for_kind_like_cpp(LootStoreKind::Gameobject);
+        gameobject_store
+            .load_rows_like_cpp(
+                [wow_loot::LootTemplateRow {
+                    entry: loot_id,
+                    item: wow_loot::LootStoreItem {
+                        item_id: reference_id,
+                        reference: reference_id,
+                        chance: 100.0,
+                        needs_quest: false,
+                        loot_mode: 1,
+                        group_id: 0,
+                        min_count: 1,
+                        max_count: 1,
+                    },
+                }],
+                |_| true,
+            )
+            .unwrap();
+        let mut reference_store = wow_loot::LootStore::for_kind_like_cpp(LootStoreKind::Reference);
+        reference_store
+            .load_rows_like_cpp(
+                [wow_loot::LootTemplateRow {
+                    entry: reference_id,
+                    item: wow_loot::LootStoreItem {
+                        item_id: quest_item_id as u32,
+                        reference: 0,
+                        chance: 100.0,
+                        needs_quest: true,
+                        loot_mode: 1,
+                        group_id: 0,
+                        min_count: 1,
+                        max_count: 1,
+                    },
+                }],
+                |_| true,
+            )
+            .unwrap();
+        let mut stores = LootStores::new();
+        stores.insert(LootStoreKind::Gameobject, gameobject_store);
+        stores.insert(LootStoreKind::Reference, reference_store);
+
+        session.set_player_guid(Some(player_guid));
+        session.set_loot_stores(Arc::new(stores));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_gameobject(
+            &canonical,
+            gameobject_guid,
+            go_entry,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+        session.represented_gameobject_use_states.insert(
+            gameobject_guid,
+            RepresentedGameObjectUseState {
+                go_type: Some(wow_entities::GAMEOBJECT_TYPE_CHEST as u8),
+                loot_state: Some(wow_entities::LootState::Ready),
+                chest_loot_source: Some(wow_entities::GameObjectLootSource {
+                    loot_id,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(session.update_visible_gameobjects_like_cpp(), 1);
+        assert_eq!(
+            send_rx
+                .try_recv()
+                .expect("chest quest-loot dynamic flags update"),
+            expected_gameobject_dynamic_flags_update_like_cpp(
+                gameobject_guid,
+                571,
+                wow_entities::GO_DYNFLAG_LO_ACTIVATE
+                    | wow_entities::GO_DYNFLAG_LO_SPARKLE
+                    | wow_entities::GO_DYNFLAG_LO_HIGHLIGHT
+            )
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn update_visible_gameobjects_sends_dynamic_flags_for_gathering_node_quest_loot_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let go_entry = 8_127;
+        let gameobject_guid = test_gameobject_guid(go_entry, 137);
+        let loot_id = 702;
+        let quest_item_id = 9_002;
+        let quest_id = 12_544;
+        let mut quest = test_quest_template(quest_id);
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_ITEM_LIKE_CPP,
+            order: 0,
+            storage_index: 0,
+            object_id: quest_item_id,
+            amount: 1,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        let mut gameobject_store =
+            wow_loot::LootStore::for_kind_like_cpp(LootStoreKind::Gameobject);
+        gameobject_store
+            .load_rows_like_cpp(
+                [wow_loot::LootTemplateRow {
+                    entry: loot_id,
+                    item: wow_loot::LootStoreItem {
+                        item_id: quest_item_id as u32,
+                        reference: 0,
+                        chance: 100.0,
+                        needs_quest: true,
+                        loot_mode: 1,
+                        group_id: 0,
+                        min_count: 1,
+                        max_count: 1,
+                    },
+                }],
+                |_| true,
+            )
+            .unwrap();
+        let mut stores = LootStores::new();
+        stores.insert(LootStoreKind::Gameobject, gameobject_store);
+
+        session.set_player_guid(Some(player_guid));
+        session.set_loot_stores(Arc::new(stores));
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![0],
+                slot: 0,
+            },
+        );
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_gameobject(
+            &canonical,
+            gameobject_guid,
+            go_entry,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+        session.represented_gameobject_use_states.insert(
+            gameobject_guid,
+            RepresentedGameObjectUseState {
+                go_type: Some(wow_entities::GAMEOBJECT_TYPE_GATHERING_NODE as u8),
+                go_state: Some(wow_entities::GoState::Ready),
+                gathering_node_loot_id: Some(loot_id),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(session.update_visible_gameobjects_like_cpp(), 1);
+        assert_eq!(
+            send_rx
+                .try_recv()
+                .expect("gathering node quest-loot dynamic flags update"),
             expected_gameobject_dynamic_flags_update_like_cpp(
                 gameobject_guid,
                 571,
