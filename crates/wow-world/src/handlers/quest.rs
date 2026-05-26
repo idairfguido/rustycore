@@ -5568,6 +5568,10 @@ impl WorldSession {
         };
 
         for quest in start_quests {
+            if !self.represented_quest_available_conditions_meet_like_cpp(quest.id) {
+                continue;
+            }
+
             if self.quest_status_like_cpp(quest.id) != QUEST_STATUS_NONE_LIKE_CPP {
                 continue;
             }
@@ -5587,6 +5591,83 @@ impl WorldSession {
         }
 
         result
+    }
+
+    fn represented_quest_available_conditions_meet_like_cpp(&self, quest_id: u32) -> bool {
+        let condition_store = if let Some(store) = self.condition_store() {
+            Arc::clone(store)
+        } else if let Some(store) = crate::conditions::condition_mgr_store_like_cpp() {
+            store
+        } else {
+            return true;
+        };
+
+        if !crate::conditions::has_conditions_for_not_grouped_entry_like_cpp(
+            condition_store.as_ref(),
+            wow_constants::ConditionSourceType::QuestAvailable,
+            quest_id,
+        ) {
+            return true;
+        }
+
+        let Some(player_object) = self.build_condition_player_object_like_cpp() else {
+            return false;
+        };
+
+        let quest_statuses: Vec<_> = self
+            .player_quests
+            .iter()
+            .map(
+                |(&quest_id, status)| crate::conditions::ConditionQuestStatusSnapshot {
+                    quest_id,
+                    status: status.status,
+                },
+            )
+            .collect();
+        let rewarded_quest_ids: Vec<_> = self.rewarded_quests.iter().copied().collect();
+        let daily_quest_ids: Vec<_> = self
+            .daily_quests_completed_like_cpp
+            .iter()
+            .copied()
+            .collect();
+        let quest_snapshot = crate::conditions::ConditionPlayerQuestSnapshot {
+            statuses: &quest_statuses,
+            objective_progress: &[],
+            rewarded_quest_ids: &rewarded_quest_ids,
+            daily_quest_ids: &daily_quest_ids,
+        };
+        let player_condition_context = self.represented_player_condition_context_like_cpp();
+        let area_table_store = self.area_table_store().cloned();
+
+        let mut source_info =
+            crate::conditions::ConditionSourceInfo::from_targets(Some(&player_object), None, None);
+        source_info.set_unit_target_snapshot(0, self.condition_player_unit_snapshot_like_cpp());
+        source_info.set_player_target_snapshot(0, self.condition_player_snapshot_like_cpp());
+        source_info.set_player_quest_target_snapshot(0, quest_snapshot);
+        if let Some(store) = self.player_condition_store() {
+            source_info.set_player_condition_store(store.as_ref());
+            source_info.set_player_condition_context(0, player_condition_context.as_context(self));
+        }
+
+        crate::conditions::is_object_meeting_not_grouped_conditions_like_cpp(
+            condition_store.as_ref(),
+            wow_constants::ConditionSourceType::QuestAvailable,
+            quest_id,
+            &mut source_info,
+            |condition, source_info| {
+                crate::conditions::condition_meets_basic_like_cpp(
+                    condition,
+                    source_info,
+                    |area_id, required_area_id| {
+                        area_table_store.as_ref().is_some_and(|store| {
+                            store.is_in_area_like_cpp(area_id, required_area_id)
+                        })
+                    },
+                )
+                .value()
+                .unwrap_or(false)
+            },
+        )
     }
 
     fn quest_status_like_cpp(&self, quest_id: u32) -> u8 {
@@ -6213,7 +6294,10 @@ impl RepresentedQuestGiverStatusSourceLikeCpp {
 mod tests {
     use super::*;
     use crate::session::InventoryItem;
-    use wow_constants::{InventoryType, ItemBondingType, ItemClass, ItemContext};
+    use wow_constants::{
+        ComparisonType, ConditionSourceType, ConditionType, InventoryType, ItemBondingType,
+        ItemClass, ItemContext,
+    };
     use wow_core::guid::HighGuid;
     use wow_core::{ObjectGuid, Position};
     use wow_data::quest::{
@@ -6224,8 +6308,9 @@ mod tests {
         QuestStore, QuestTemplate,
     };
     use wow_data::{
-        CurrencyTypesEntry, CurrencyTypesStore, ItemLimitCategoryEntry, ItemLimitCategoryStore,
-        ItemRecord, ItemSparseTemplateEntry, ItemStatsStore, ItemStore,
+        Condition, ConditionEntriesByTypeStore, CurrencyTypesEntry, CurrencyTypesStore,
+        ItemLimitCategoryEntry, ItemLimitCategoryStore, ItemRecord, ItemSparseTemplateEntry,
+        ItemStatsStore, ItemStore,
         progression_rewards::{
             FactionEntry, FactionStore, QUEST_PACKAGE_FILTER_UNMATCHED_LIKE_CPP,
             QuestFactionRewardEntry, QuestFactionRewardStore, QuestPackageItemEntry,
@@ -14165,6 +14250,64 @@ mod tests {
         run_status_query(&mut session, guid).await;
 
         assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::FUTURE));
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_starter_respects_quest_available_conditions_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let quest_id = 1008;
+        let mut quest = quest_template(quest_id);
+        quest.quest_level = 80;
+        let mut store = QuestStore::from_quests_like_cpp([quest]);
+        store.starter_quests.entry(9008).or_default().push(quest_id);
+        session.set_quest_store(Arc::new(store));
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::QuestAvailable,
+                source_entry: quest_id as i32,
+                condition_type: ConditionType::Level,
+                condition_value1: 90,
+                condition_value2: ComparisonType::HighEq as u32,
+                ..Condition::default()
+            }]),
+        ));
+        let guid = creature_guid(9008, 8);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9008);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::NONE));
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_starter_allows_passing_quest_available_conditions_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let quest_id = 1009;
+        let mut quest = quest_template(quest_id);
+        quest.quest_level = 80;
+        let mut store = QuestStore::from_quests_like_cpp([quest]);
+        store.starter_quests.entry(9009).or_default().push(quest_id);
+        session.set_quest_store(Arc::new(store));
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::QuestAvailable,
+                source_entry: quest_id as i32,
+                condition_type: ConditionType::Level,
+                condition_value1: 80,
+                condition_value2: ComparisonType::HighEq as u32,
+                ..Condition::default()
+            }]),
+        ));
+        let guid = creature_guid(9009, 9);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9009);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::QUEST));
     }
 
     #[tokio::test]
