@@ -50,7 +50,7 @@ use wow_world::{
     conditions::{
         ConditionMapRef, ConditionMapStateSnapshot, is_spawn_group_meeting_map_conditions_like_cpp,
     },
-    entity_update_bridge::unit_values_update_to_update_object,
+    entity_update_bridge::unit_values_update_to_packet,
 };
 
 mod creature_loaded_grid;
@@ -4399,14 +4399,15 @@ fn fanout_game_event_npc_flag_values_update_to_visible_sessions_like_cpp(
         summary.update_npc_flags_values_update_map_id_out_of_range += 1;
         return;
     };
-    let Some(update) = unit_values_update_to_update_object(
-        values_update.guid,
-        map_id,
-        &values_update.values_update,
-    ) else {
+    let Some(packet_update) = unit_values_update_to_packet(&values_update.values_update) else {
         summary.update_npc_flags_values_update_empty += 1;
         return;
     };
+    let update = wow_packet::packets::update::UpdateObject::unit_values_update(
+        values_update.guid,
+        map_id,
+        packet_update.clone(),
+    );
     summary.update_npc_flags_values_updates_built += 1;
 
     let Some(player_registry) = player_registry else {
@@ -4431,6 +4432,7 @@ fn fanout_game_event_npc_flag_values_update_to_visible_sessions_like_cpp(
                 object_guid: values_update.guid,
                 map_id,
                 packet_bytes: packet_bytes.clone(),
+                unit_values_update: Some(packet_update.clone()),
             });
         match session.command_tx.try_send(command) {
             Ok(()) => summary.update_npc_flags_values_update_send_queued += 1,

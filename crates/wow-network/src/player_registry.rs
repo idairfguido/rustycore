@@ -31,6 +31,7 @@ pub struct SendVisibleObjectValuesUpdateCommand {
     pub object_guid: ObjectGuid,
     pub map_id: u16,
     pub packet_bytes: Vec<u8>,
+    pub unit_values_update: Option<wow_packet::packets::update::UnitDataValuesDeltaUpdate>,
 }
 
 #[derive(Clone, Debug)]

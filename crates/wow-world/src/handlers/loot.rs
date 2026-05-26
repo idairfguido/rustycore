@@ -2534,7 +2534,16 @@ impl WorldSession {
             return;
         }
 
-        self.send_raw_packet(&command.packet_bytes);
+        if let Some(unit_values_update) = command.unit_values_update {
+            let update = self.represented_unit_packet_update_to_update_object_like_cpp(
+                command.object_guid,
+                command.map_id,
+                unit_values_update,
+            );
+            self.send_packet(&update);
+        } else {
+            self.send_raw_packet(&command.packet_bytes);
+        }
     }
 
     fn handle_send_repeatable_turn_in_request_items_command_like_cpp(

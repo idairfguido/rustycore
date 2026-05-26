@@ -16,7 +16,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::entity_update_bridge::{
     dynamic_object_values_update_to_update_object, item_values_update_to_update_object,
-    player_values_update_to_update_object, unit_values_update_to_update_object,
+    player_values_update_to_update_object, unit_values_update_to_packet,
 };
 use crate::map_manager::{WorldMMapPathRequestLikeCpp, WorldMMapPathfinderWorkerLikeCpp};
 use crate::phasing::{
@@ -5061,6 +5061,101 @@ impl WorldSession {
             RepresentedCanSeeSpellClickOutcomeLikeCpp::Visible
             | RepresentedCanSeeSpellClickOutcomeLikeCpp::ExactContextUnrepresented => npc_flags,
         }
+    }
+
+    pub(crate) fn represented_unit_values_update_to_update_object_like_cpp(
+        &self,
+        unit_guid: ObjectGuid,
+        map_id: u16,
+        values_update: &wow_entities::UnitValuesUpdate,
+    ) -> Option<wow_packet::packets::update::UpdateObject> {
+        let packet_update = unit_values_update_to_packet(values_update)?;
+        Some(
+            self.represented_unit_packet_update_to_update_object_like_cpp(
+                unit_guid,
+                map_id,
+                packet_update,
+            ),
+        )
+    }
+
+    pub(crate) fn represented_unit_packet_update_to_update_object_like_cpp(
+        &self,
+        unit_guid: ObjectGuid,
+        map_id: u16,
+        mut packet_update: wow_packet::packets::update::UnitDataValuesDeltaUpdate,
+    ) -> wow_packet::packets::update::UpdateObject {
+        if unit_guid.is_any_type_creature()
+            && (packet_update.npc_flags[0] & UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32) != 0
+        {
+            let npc_flags = u64::from(packet_update.npc_flags[0])
+                | (u64::from(packet_update.npc_flags[1]) << 32);
+            let filtered =
+                self.represented_viewer_dependent_creature_npc_flags_like_cpp(unit_guid, npc_flags);
+            packet_update.npc_flags[0] = filtered as u32;
+            packet_update.npc_flags[1] = (filtered >> 32) as u32;
+        }
+
+        wow_packet::packets::update::UpdateObject::unit_values_update(
+            unit_guid,
+            map_id,
+            packet_update,
+        )
+    }
+
+    pub(crate) fn update_visible_spell_clicks_like_cpp(&mut self) -> usize {
+        let Some(spell_click_store) = self.npc_spell_click_store.as_ref() else {
+            return 0;
+        };
+        let Some(condition_store) = self.condition_store.as_ref() else {
+            return 0;
+        };
+
+        let mut sent = 0;
+        let visible_guids = self
+            .client_visible_guids_like_cpp
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        for guid in visible_guids {
+            if !guid.is_creature_or_vehicle() {
+                continue;
+            }
+            let Some(creature) = self.represented_spell_click_creature_snapshot_like_cpp(guid)
+            else {
+                continue;
+            };
+            if (u64::from(creature.npc_flags) & UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP) == 0 {
+                continue;
+            }
+            let click_bounds =
+                spell_click_store.spell_click_info_map_bounds_like_cpp(creature.entry);
+            if !click_bounds.iter().any(|click| {
+                crate::conditions::has_conditions_for_spell_click_event_like_cpp(
+                    condition_store,
+                    creature.entry,
+                    click.spell_id,
+                )
+            }) {
+                continue;
+            }
+
+            let mut packet_update =
+                wow_packet::packets::update::UnitDataValuesDeltaUpdate::default();
+            packet_update.changed_object_type_mask = 1 << wow_entities::TYPEID_UNIT;
+            packet_update.unit_data_mask[113 / 32] |= 1 << (113 % 32);
+            packet_update.unit_data_mask[114 / 32] |= 1 << (114 % 32);
+            packet_update.npc_flags = [creature.npc_flags, 0];
+            let update = self.represented_unit_packet_update_to_update_object_like_cpp(
+                guid,
+                self.player_map_id_like_cpp(),
+                packet_update,
+            );
+            self.send_packet(&update);
+            sent += 1;
+        }
+
+        sent
     }
 
     pub(crate) fn represented_npc_can_interact_with_like_cpp(
@@ -11515,7 +11610,7 @@ impl WorldSession {
                 && self
                     .client_visible_guids_like_cpp
                     .contains(&reward.creature_guid)
-                && let Some(update) = unit_values_update_to_update_object(
+                && let Some(update) = self.represented_unit_values_update_to_update_object_like_cpp(
                     reward.creature_guid,
                     self.player_map_id_like_cpp(),
                     &values_update,
@@ -20117,7 +20212,7 @@ impl WorldSession {
         }
 
         if self.client_visible_guids_like_cpp.contains(&combat_target)
-            && let Some(update) = unit_values_update_to_update_object(
+            && let Some(update) = self.represented_unit_values_update_to_update_object_like_cpp(
                 combat_target,
                 self.player_map_id_like_cpp(),
                 &values_update,
@@ -20803,7 +20898,7 @@ impl WorldSession {
             .ok_or("Target not found")?;
 
         if self.client_visible_guids_like_cpp.contains(&target_guid)
-            && let Some(update) = unit_values_update_to_update_object(
+            && let Some(update) = self.represented_unit_values_update_to_update_object_like_cpp(
                 target_guid,
                 self.player_map_id_like_cpp(),
                 &values_update,
@@ -20900,7 +20995,7 @@ impl WorldSession {
         }
 
         if self.client_visible_guids_like_cpp.contains(&target_guid)
-            && let Some(update) = unit_values_update_to_update_object(
+            && let Some(update) = self.represented_unit_values_update_to_update_object_like_cpp(
                 target_guid,
                 self.player_map_id_like_cpp(),
                 &values_update,
@@ -21110,13 +21205,14 @@ mod tests {
     use wow_entities::{
         AccessorObjectRef, BANK_SLOT_BAG_START, EQUIPMENT_SLOT_CHEST, INVENTORY_SLOT_BAG_START,
         INVENTORY_SLOT_ITEM_START, REAGENT_BAG_SLOT_START, SendNewItemInstancePlan,
-        SendNewItemModifier,
+        SendNewItemModifier, TYPEID_UNIT, UNIT_DATA_BITS, UnitDataUpdate, UnitDataValues,
+        UnitValuesUpdate, UpdateMask,
     };
     use wow_movement::MoveSplineFlag;
     use wow_network::{
         GameEventQuestCompleteClientOutcomeLikeCpp, GameEventQuestCompleteResponseLikeCpp,
-        GroupInfo, PendingInvites, PlayerBroadcastInfo, ResetSeasonalQuestStatusCommand,
-        SendVisibleObjectValuesUpdateCommand,
+        GroupInfo, GroupRegistry, PendingInvites, PlayerBroadcastInfo,
+        ResetSeasonalQuestStatusCommand, SendVisibleObjectValuesUpdateCommand,
     };
     use wow_packet::ServerPacket;
     use wow_packet::packets::loot::{
@@ -21513,6 +21609,7 @@ mod tests {
                     object_guid,
                     map_id: 571,
                     packet_bytes: packet_bytes.clone(),
+                    unit_values_update: None,
                 },
             ))
             .expect("command queued");
@@ -21529,6 +21626,7 @@ mod tests {
                     object_guid,
                     map_id: 571,
                     packet_bytes: packet_bytes.clone(),
+                    unit_values_update: None,
                 },
             ))
             .expect("command queued");
@@ -21541,6 +21639,373 @@ mod tests {
             packet_bytes
         );
         assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn visible_unit_values_update_command_applies_viewer_dependent_spellclick_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(127);
+
+        session.state = SessionState::LoggedIn;
+        session.set_player_map_position_like_cpp(571, Position::ZERO);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [],
+            |entry| entry == 707,
+            |_| false,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            707,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            (UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32)
+                | wow_constants::unit::NPCFlags1::GOSSIP.bits(),
+        );
+        session.client_visible_guids_like_cpp.insert(creature_guid);
+
+        let mut packet_update = wow_packet::packets::update::UnitDataValuesDeltaUpdate::default();
+        packet_update.changed_object_type_mask = 1 << TYPEID_UNIT;
+        packet_update.unit_data_mask[113 / 32] |= 1 << (113 % 32);
+        packet_update.unit_data_mask[114 / 32] |= 1 << (114 % 32);
+        packet_update.npc_flags = [
+            (UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32)
+                | wow_constants::unit::NPCFlags1::GOSSIP.bits(),
+            0,
+        ];
+        let raw_packet = wow_packet::packets::update::UpdateObject::unit_values_update(
+            creature_guid,
+            571,
+            packet_update.clone(),
+        )
+        .to_bytes();
+        let expected_packet = session
+            .represented_unit_packet_update_to_update_object_like_cpp(
+                creature_guid,
+                571,
+                packet_update.clone(),
+            )
+            .to_bytes();
+        assert_ne!(raw_packet, expected_packet);
+
+        session
+            .session_command_tx()
+            .try_send(SessionCommand::SendVisibleObjectValuesUpdate(
+                SendVisibleObjectValuesUpdateCommand {
+                    object_guid: creature_guid,
+                    map_id: 571,
+                    packet_bytes: raw_packet,
+                    unit_values_update: Some(packet_update),
+                },
+            ))
+            .expect("command queued");
+        session
+            .process_represented_session_commands_like_cpp()
+            .await;
+
+        assert_eq!(
+            send_rx.try_recv().expect("filtered visible unit update"),
+            expected_packet
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn update_visible_spell_clicks_sends_conditioned_npcflags_delta_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(128);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::SpellClickEvent,
+                source_group: 708,
+                source_entry: 908,
+                source_id: 0,
+                condition_type: ConditionType::Aura,
+                condition_value1: 999_999,
+                ..Condition::default()
+            }]),
+        ));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 708,
+                spell_id: 908,
+                cast_flags: 0,
+                user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+            }],
+            |entry| entry == 708,
+            |spell| spell == 908,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            708,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            (UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32)
+                | wow_constants::unit::NPCFlags1::GOSSIP.bits(),
+        );
+        session.client_visible_guids_like_cpp.insert(creature_guid);
+
+        let mut packet_update = wow_packet::packets::update::UnitDataValuesDeltaUpdate::default();
+        packet_update.changed_object_type_mask = 1 << TYPEID_UNIT;
+        packet_update.unit_data_mask[113 / 32] |= 1 << (113 % 32);
+        packet_update.unit_data_mask[114 / 32] |= 1 << (114 % 32);
+        packet_update.npc_flags = [
+            (UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32)
+                | wow_constants::unit::NPCFlags1::GOSSIP.bits(),
+            0,
+        ];
+        let expected_packet = session
+            .represented_unit_packet_update_to_update_object_like_cpp(
+                creature_guid,
+                571,
+                packet_update,
+            )
+            .to_bytes();
+
+        assert_eq!(session.update_visible_spell_clicks_like_cpp(), 1);
+        assert_eq!(
+            send_rx.try_recv().expect("spellclick refresh update"),
+            expected_packet
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn update_visible_spell_clicks_skips_unconditioned_spellclick_rows_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(129);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 709,
+                spell_id: 909,
+                cast_flags: 0,
+                user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+            }],
+            |entry| entry == 709,
+            |spell| spell == 909,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            709,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32,
+        );
+        session.client_visible_guids_like_cpp.insert(creature_guid);
+
+        assert_eq!(session.update_visible_spell_clicks_like_cpp(), 0);
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn complete_quest_triggers_visible_spellclick_refresh_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(130);
+        let quest_id = 12_540;
+        let mut quest = test_quest_template(quest_id);
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_MONEY_LIKE_CPP,
+            order: 0,
+            storage_index: -1,
+            object_id: 0,
+            amount: 100,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(90);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::SpellClickEvent,
+                source_group: 710,
+                source_entry: 910,
+                source_id: 0,
+                condition_type: ConditionType::Aura,
+                condition_value1: 999_999,
+                ..Condition::default()
+            }]),
+        ));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 710,
+                spell_id: 910,
+                cast_flags: 0,
+                user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+            }],
+            |entry| entry == 710,
+            |spell| spell == 910,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            710,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32,
+        );
+        session.client_visible_guids_like_cpp.insert(creature_guid);
+
+        session.money_changed_like_cpp(100).await;
+
+        let packets = drain_server_packet_bytes(&send_rx);
+        assert_eq!(update_object_packet_count_like_cpp(&packets), 1);
+        assert!(packets.iter().any(|bytes| {
+            wow_packet::WorldPacket::from_bytes(bytes).server_opcode()
+                == Some(ServerOpcodes::UpdateObject)
+        }));
+    }
+
+    #[tokio::test]
+    async fn leave_group_triggers_visible_spellclick_refresh_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 43);
+        let creature_guid = test_creature_guid(131);
+        let (other_tx, _other_rx) = flume::bounded(8);
+        let player_registry = Arc::new(wow_network::PlayerRegistry::default());
+        player_registry.insert(other_guid, broadcast_info(other_guid, other_tx));
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(other_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+
+        session.set_player_guid(Some(player_guid));
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(Arc::clone(&player_registry));
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::SpellClickEvent,
+                source_group: 711,
+                source_entry: 911,
+                source_id: 0,
+                condition_type: ConditionType::Aura,
+                condition_value1: 999_999,
+                ..Condition::default()
+            }]),
+        ));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 711,
+                spell_id: 911,
+                cast_flags: 0,
+                user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+            }],
+            |entry| entry == 711,
+            |spell| spell == 911,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            711,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32,
+        );
+        session.client_visible_guids_like_cpp.insert(creature_guid);
+
+        let mut pkt = wow_packet::WorldPacket::new_empty();
+        pkt.write_bit(false);
+        pkt.flush_bits();
+        pkt.reset_read();
+        session.handle_leave_group(pkt).await;
+
+        assert_eq!(session.group_guid, None);
+        let packets = drain_server_packet_bytes(&send_rx);
+        assert!(packets.iter().any(|bytes| {
+            wow_packet::WorldPacket::from_bytes(bytes).server_opcode()
+                == Some(ServerOpcodes::UpdateObject)
+        }));
+        assert!(packets.iter().any(|bytes| {
+            wow_packet::WorldPacket::from_bytes(bytes).server_opcode()
+                == Some(ServerOpcodes::GroupUninvite)
+        }));
     }
 
     fn expected_active_player_farsight_object_values_update_like_cpp(
@@ -28886,6 +29351,131 @@ mod tests {
             ),
             UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP
         );
+    }
+
+    #[test]
+    fn represented_unit_values_update_filters_spellclick_npc_flags_delta_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(125);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [],
+            |entry| entry == 705,
+            |_| false,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            705,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            (UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32)
+                | wow_constants::unit::NPCFlags1::GOSSIP.bits(),
+        );
+
+        let mut mask = UpdateMask::new(UNIT_DATA_BITS);
+        mask.set(113);
+        mask.set(114);
+        mask.set(115);
+        let mut values = UnitDataValues::default();
+        values.npc_flags = [
+            (UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32)
+                | wow_constants::unit::NPCFlags1::GOSSIP.bits(),
+            0xA5A5_0001,
+        ];
+        let update = UnitValuesUpdate {
+            changed_object_type_mask: 1 << TYPEID_UNIT,
+            object_data: None,
+            unit_data: Some(UnitDataUpdate { mask, values }),
+        };
+
+        let packet = session
+            .represented_unit_values_update_to_update_object_like_cpp(creature_guid, 571, &update)
+            .expect("delta packet");
+        let wow_packet::packets::update::UpdateBlock::UnitValuesUpdate { data, .. } =
+            &packet.blocks[0]
+        else {
+            panic!("unit values update block expected");
+        };
+
+        assert_eq!(
+            data.npc_flags[0],
+            wow_constants::unit::NPCFlags1::GOSSIP.bits()
+        );
+        assert_eq!(data.npc_flags[1], 0xA5A5_0001);
+    }
+
+    #[test]
+    fn represented_unit_values_update_preserves_unrepresented_spellclick_delta_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let creature_guid = test_creature_guid(126);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_condition_store(Arc::new(ConditionEntriesByTypeStore::default()));
+        session.set_npc_spell_click_store(Arc::new(NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 706,
+                spell_id: 906,
+                cast_flags: 0,
+                user_type: SPELL_CLICK_USER_RAID_LIKE_CPP,
+            }],
+            |entry| entry == 706,
+            |spell| spell == 906,
+        )));
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            706,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32,
+        );
+
+        let mut mask = UpdateMask::new(UNIT_DATA_BITS);
+        mask.set(113);
+        mask.set(114);
+        let mut values = UnitDataValues::default();
+        values.npc_flags = [UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32, 0];
+        let update = UnitValuesUpdate {
+            changed_object_type_mask: 1 << TYPEID_UNIT,
+            object_data: None,
+            unit_data: Some(UnitDataUpdate { mask, values }),
+        };
+
+        let packet = session
+            .represented_unit_values_update_to_update_object_like_cpp(creature_guid, 571, &update)
+            .expect("delta packet");
+        let wow_packet::packets::update::UpdateBlock::UnitValuesUpdate { data, .. } =
+            &packet.blocks[0]
+        else {
+            panic!("unit values update block expected");
+        };
+
+        assert_eq!(data.npc_flags[0], UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP as u32);
     }
 
     #[test]

@@ -734,6 +734,7 @@ impl WorldSession {
                 script_status_change_unrepresented: true,
             },
         );
+        let _ = self.update_visible_spell_clicks_like_cpp();
         self.sync_player_registry_state_like_cpp();
         true
     }

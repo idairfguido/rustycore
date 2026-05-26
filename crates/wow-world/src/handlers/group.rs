@@ -493,8 +493,9 @@ impl WorldSession {
                 }
             }
             // Tell self to leave.
-            self.send_packet(&GroupUninvite);
             self.group_guid = None;
+            let _ = self.update_visible_spell_clicks_like_cpp();
+            self.send_packet(&GroupUninvite);
             return;
         }
 
@@ -504,8 +505,9 @@ impl WorldSession {
         }
 
         // 4. Uninvite self.
-        self.send_packet(&GroupUninvite);
         self.group_guid = None;
+        let _ = self.update_visible_spell_clicks_like_cpp();
+        self.send_packet(&GroupUninvite);
     }
 
     /// CMSG_SET_LOOT_METHOD.
