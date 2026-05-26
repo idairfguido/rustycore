@@ -5346,11 +5346,11 @@ impl WorldSession {
 
         match state.go_type.map(u32::from) {
             Some(wow_entities::GAMEOBJECT_TYPE_QUESTGIVER) => {
-                let Some(store) = self.quest_store.as_ref() else {
-                    return false;
-                };
-                store.gameobject_has_end_quests(gameobject_entry)
-                    || store.gameobject_has_start_quests(gameobject_entry)
+                self.get_represented_quest_giver_status_like_cpp(
+                    crate::handlers::quest::RepresentedQuestGiverStatusSourceLikeCpp::GameObject {
+                        entry: gameobject_entry,
+                    },
+                ) != 0
             }
             Some(wow_entities::GAMEOBJECT_TYPE_CHEST) => state.loot_state
                 != Some(wow_entities::LootState::NotReady)
@@ -22480,6 +22480,61 @@ mod tests {
                     | wow_entities::GO_DYNFLAG_LO_SPARKLE
                     | wow_entities::GO_DYNFLAG_LO_HIGHLIGHT
             )
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn update_visible_gameobjects_questgiver_future_status_does_not_activate_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let go_entry = 8_129;
+        let gameobject_guid = test_gameobject_guid(go_entry, 139);
+        let quest_id = 12_546;
+        let mut quest = test_quest_template(quest_id);
+        quest.min_level = 90;
+        let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([quest]);
+        quest_store
+            .gameobject_starter_quests
+            .insert(go_entry, vec![quest_id]);
+
+        session.set_player_guid(Some(player_guid));
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_gameobject(
+            &canonical,
+            gameobject_guid,
+            go_entry,
+            Position::new(12.0, 0.0, 0.0, 0.0),
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+        session.represented_gameobject_use_states.insert(
+            gameobject_guid,
+            RepresentedGameObjectUseState {
+                go_type: Some(wow_entities::GAMEOBJECT_TYPE_QUESTGIVER as u8),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(session.update_visible_gameobjects_like_cpp(), 1);
+        assert_eq!(
+            send_rx
+                .try_recv()
+                .expect("future questgiver dynamic flags update"),
+            expected_gameobject_dynamic_flags_update_like_cpp(gameobject_guid, 571, 0)
         );
         assert!(send_rx.try_recv().is_err());
     }
