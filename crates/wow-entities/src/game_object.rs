@@ -50,7 +50,11 @@ pub const GAMEOBJECT_TYPE_ITEM_FORGE: u32 = 47;
 pub const GAMEOBJECT_TYPE_UI_LINK: u32 = 48;
 pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
 
+pub const GO_DYNFLAG_LO_ACTIVATE: u32 = 0x0004;
+pub const GO_DYNFLAG_LO_DEPLETED: u32 = 0x0010;
+pub const GO_DYNFLAG_LO_SPARKLE: u32 = 0x0020;
 pub const GO_DYNFLAG_LO_NO_INTERACT: u32 = 0x0080;
+pub const GO_DYNFLAG_LO_HIGHLIGHT: u32 = 0x0200;
 
 // C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2892
 pub const MAX_GAMEOBJECT_TYPE: u32 = 63;
@@ -75,6 +79,7 @@ pub const GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS: usize = 18;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 
 pub const GO_FLAG_IN_USE: u32 = 0x0000_0001;
+pub const GO_FLAG_INTERACT_COND: u32 = 0x0000_0004;
 // C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2902
 pub const GO_FLAG_NODESPAWN: u32 = 0x0000_0020;
 // C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2914

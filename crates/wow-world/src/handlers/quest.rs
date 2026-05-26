@@ -496,7 +496,7 @@ impl WorldSession {
         (accept_time, end_time)
     }
 
-    fn represented_quest_objective_complete_like_cpp(
+    pub(crate) fn represented_quest_objective_complete_like_cpp(
         status: &PlayerQuestStatus,
         quest: &wow_data::quest::QuestTemplate,
         objective: &wow_data::quest::QuestObjective,
@@ -557,7 +557,7 @@ impl WorldSession {
         false
     }
 
-    fn represented_quest_objective_completable_like_cpp(
+    pub(crate) fn represented_quest_objective_completable_like_cpp(
         status: &PlayerQuestStatus,
         quest: &wow_data::quest::QuestTemplate,
         objective_index: usize,
@@ -734,7 +734,7 @@ impl WorldSession {
                 script_status_change_unrepresented: true,
             },
         );
-        let _ = self.update_visible_spell_clicks_like_cpp();
+        let _ = self.update_visible_gameobjects_or_spell_clicks_like_cpp();
         self.sync_player_registry_state_like_cpp();
         true
     }

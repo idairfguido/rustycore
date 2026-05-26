@@ -6,6 +6,8 @@ use wow_core::ObjectGuid;
 
 static NEXT_GROUP_ID: AtomicU64 = AtomicU64::new(1);
 
+pub const GROUP_FLAG_RAID_LIKE_CPP: u16 = 0x002;
+
 /// Information about one group/party.
 #[derive(Debug, Clone)]
 pub struct GroupInfo {
@@ -17,6 +19,7 @@ pub struct GroupInfo {
     pub loot_method: u8,
     pub master_looter_guid: ObjectGuid,
     pub sequence_num: u32,
+    pub group_flags: u16,
 }
 
 impl GroupInfo {
@@ -28,6 +31,7 @@ impl GroupInfo {
             loot_method: 0,
             master_looter_guid: ObjectGuid::EMPTY,
             sequence_num: 1,
+            group_flags: 0,
         }
     }
 
@@ -36,6 +40,28 @@ impl GroupInfo {
             self.members.push(guid);
             self.sequence_num += 1;
         }
+    }
+
+    pub fn is_raid_group(&self) -> bool {
+        (self.group_flags & GROUP_FLAG_RAID_LIKE_CPP) != 0
+    }
+
+    pub fn convert_to_raid_like_cpp(&mut self) {
+        if !self.is_raid_group() {
+            self.group_flags |= GROUP_FLAG_RAID_LIKE_CPP;
+            self.sequence_num += 1;
+        }
+    }
+
+    pub fn convert_to_group_like_cpp(&mut self) -> bool {
+        if self.members.len() > 5 {
+            return false;
+        }
+        if self.is_raid_group() {
+            self.group_flags &= !GROUP_FLAG_RAID_LIKE_CPP;
+            self.sequence_num += 1;
+        }
+        true
     }
 
     pub fn remove_member(&mut self, guid: &ObjectGuid) {

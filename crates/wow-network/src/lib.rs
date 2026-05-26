@@ -16,7 +16,7 @@ pub use accept::{
     LootDropRatesLikeCpp, ReputationRatesLikeCpp, SessionResources, start_instance_listener,
     start_world_listener,
 };
-pub use group_registry::{GroupInfo, GroupRegistry, PendingInvites};
+pub use group_registry::{GROUP_FLAG_RAID_LIKE_CPP, GroupInfo, GroupRegistry, PendingInvites};
 pub use player_registry::{
     GameEventQuestCompleteClientOutcomeLikeCpp, GameEventQuestCompleteCommandLikeCpp,
     GameEventQuestCompleteResponseLikeCpp, LootRollStoreWinnerCommand, LootRollVoteCommand,

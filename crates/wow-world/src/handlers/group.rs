@@ -108,7 +108,7 @@ fn send_party_update(group: &GroupInfo, registry: &PlayerRegistry, _vra: u32) {
         };
 
         let update = PartyUpdate {
-            party_flags: 0,
+            party_flags: group.group_flags,
             party_index: 0,
             party_type: 1,
             my_index: my_idx as i32,
@@ -393,9 +393,11 @@ impl WorldSession {
             .find(|entry| entry.value().members.contains(&inviter_guid))
             .map(|entry| *entry.key());
 
+        let mut refresh_visible_gameobjects_or_spellclicks = false;
         let group_guid = if let Some(gid) = existing_gid {
             if let Some(mut g) = group_reg.get_mut(&gid) {
                 g.add_member(my_guid);
+                refresh_visible_gameobjects_or_spellclicks = g.is_raid_group();
             }
             gid
         } else {
@@ -409,6 +411,9 @@ impl WorldSession {
 
         // Update self's group_guid in session — all Arc borrows are gone now.
         self.group_guid = Some(group_guid);
+        if refresh_visible_gameobjects_or_spellclicks {
+            let _ = self.update_visible_gameobjects_or_spell_clicks_like_cpp();
+        }
 
         // 4. Send PartyUpdate + PartyMemberFullState to all members.
         let vra = self.virtual_realm_address();
@@ -494,7 +499,7 @@ impl WorldSession {
             }
             // Tell self to leave.
             self.group_guid = None;
-            let _ = self.update_visible_spell_clicks_like_cpp();
+            let _ = self.update_visible_gameobjects_or_spell_clicks_like_cpp();
             self.send_packet(&GroupUninvite);
             return;
         }
@@ -506,7 +511,7 @@ impl WorldSession {
 
         // 4. Uninvite self.
         self.group_guid = None;
-        let _ = self.update_visible_spell_clicks_like_cpp();
+        let _ = self.update_visible_gameobjects_or_spell_clicks_like_cpp();
         self.send_packet(&GroupUninvite);
     }
 
@@ -680,6 +685,29 @@ mod tests {
             !sent
                 .windows(master_bytes.len())
                 .any(|window| window == master_bytes.as_slice())
+        );
+    }
+
+    #[test]
+    fn party_update_serializes_raid_group_flag_like_cpp() {
+        let leader = ObjectGuid::create_player(1, 42);
+        let (tx, rx) = bounded(8);
+        let registry = PlayerRegistry::default();
+        registry.insert(leader, broadcast_info(leader, tx));
+        let mut group = GroupInfo::new(leader);
+        group.convert_to_raid_like_cpp();
+
+        send_party_update(&group, &registry, 0);
+
+        let sent = rx.try_recv().unwrap();
+        let mut pkt = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            pkt.read_uint16().unwrap(),
+            ServerOpcodes::PartyUpdate as u16
+        );
+        assert_eq!(
+            pkt.read_uint16().unwrap(),
+            wow_network::GROUP_FLAG_RAID_LIKE_CPP
         );
     }
 
