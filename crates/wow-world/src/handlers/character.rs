@@ -9442,7 +9442,7 @@ mod tests {
 
         assert_eq!(
             recv_status_multiple(&send_rx),
-            vec![(guid, quest_giver_status::AVAILABLE)]
+            vec![(guid, quest_giver_status::TRIVIAL)]
         );
     }
 
@@ -9464,7 +9464,7 @@ mod tests {
 
         assert_eq!(
             recv_status_multiple(&send_rx),
-            vec![(guid, quest_giver_status::AVAILABLE)]
+            vec![(guid, quest_giver_status::TRIVIAL)]
         );
     }
 

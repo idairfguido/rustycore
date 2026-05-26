@@ -5513,8 +5513,7 @@ impl WorldSession {
     /// Bounded representation of C++ `Player::GetQuestDialogStatus(Object const*)`.
     /// Creature sources use Creature starter/ender relations; GameObject sources use
     /// GO starter/ender relations. Full AI dialog status, ConditionMgr, event overlays
-    /// and important/daily/trivial/future/repeatable/covenant/legendary/POI bit flags
-    /// remain documented migration gaps for this slice.
+    /// and important/covenant/journey DB2 classification remain documented migration gaps.
     pub(crate) fn get_represented_quest_giver_status_like_cpp(
         &self,
         source: RepresentedQuestGiverStatusSourceLikeCpp,
@@ -5523,45 +5522,222 @@ impl WorldSession {
             return quest_giver_status::NONE;
         };
 
-        let has_turn_in = match source {
-            RepresentedQuestGiverStatusSourceLikeCpp::Creature { entry } => store
-                .quests_for_ender(entry)
-                .iter()
-                .any(|q| self.completed_quest_can_reward_status_like_cpp(q.id)),
-            RepresentedQuestGiverStatusSourceLikeCpp::GameObject { entry } => store
-                .quests_for_gameobject_ender(entry)
-                .iter()
-                .any(|q| self.completed_quest_can_reward_status_like_cpp(q.id)),
+        let turn_in_quests = match source {
+            RepresentedQuestGiverStatusSourceLikeCpp::Creature { entry } => {
+                store.quests_for_ender(entry)
+            }
+            RepresentedQuestGiverStatusSourceLikeCpp::GameObject { entry } => {
+                store.quests_for_gameobject_ender(entry)
+            }
         };
 
-        if has_turn_in {
-            return quest_giver_status::CAN_REWARD;
+        let mut result = quest_giver_status::NONE;
+
+        for quest in turn_in_quests {
+            match self.quest_status_like_cpp(quest.id) {
+                QUEST_STATUS_COMPLETE_LIKE_CPP => {
+                    result |= Self::represented_quest_reward_complete_status_like_cpp(quest);
+                }
+                QUEST_STATUS_INCOMPLETE_LIKE_CPP => {
+                    result |= Self::represented_quest_reward_status_like_cpp(quest);
+                }
+                _ => {}
+            }
+
+            if quest.quest_type == 0
+                && self.can_take_quest(quest)
+                && quest.is_repeatable()
+                && !quest.is_daily_or_weekly_like_cpp()
+                && !quest.is_monthly_like_cpp()
+            {
+                if self.represented_quest_is_trivial_like_cpp(quest) {
+                    result |= quest_giver_status::TRIVIAL_REPEATABLE_TURNIN;
+                } else {
+                    result |= quest_giver_status::REPEATABLE_TURNIN;
+                }
+            }
         }
 
-        let has_available = match source {
-            RepresentedQuestGiverStatusSourceLikeCpp::Creature { entry } => store
-                .quests_for_starter(entry)
-                .iter()
-                .any(|q| self.can_take_quest(q)),
-            RepresentedQuestGiverStatusSourceLikeCpp::GameObject { entry } => store
-                .quests_for_gameobject_starter(entry)
-                .iter()
-                .any(|q| self.can_take_quest(q)),
+        let start_quests = match source {
+            RepresentedQuestGiverStatusSourceLikeCpp::Creature { entry } => {
+                store.quests_for_starter(entry)
+            }
+            RepresentedQuestGiverStatusSourceLikeCpp::GameObject { entry } => {
+                store.quests_for_gameobject_starter(entry)
+            }
         };
 
-        if has_available {
-            quest_giver_status::AVAILABLE
+        for quest in start_quests {
+            if self.quest_status_like_cpp(quest.id) != QUEST_STATUS_NONE_LIKE_CPP {
+                continue;
+            }
+
+            if !self.can_see_start_quest_represented_bounded_like_cpp(quest) {
+                continue;
+            }
+
+            if self.satisfy_quest_level_represented_like_cpp(quest) {
+                result |= Self::represented_quest_available_status_like_cpp(
+                    quest,
+                    self.represented_quest_is_trivial_like_cpp(quest),
+                );
+            } else {
+                result |= Self::represented_quest_future_status_like_cpp(quest);
+            }
+        }
+
+        result
+    }
+
+    fn quest_status_like_cpp(&self, quest_id: u32) -> u8 {
+        if self.rewarded_quests.contains(&quest_id) {
+            return QUEST_STATUS_REWARDED_LIKE_CPP;
+        }
+
+        self.player_quests
+            .get(&quest_id)
+            .map(|quest| quest.status)
+            .unwrap_or(QUEST_STATUS_NONE_LIKE_CPP)
+    }
+
+    fn represented_quest_reward_complete_status_like_cpp(
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> u64 {
+        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+            if (quest.flags & wow_data::quest::QUEST_FLAGS_HIDE_REWARD_POI_LIKE_CPP) != 0 {
+                quest_giver_status::LEGENDARY_REWARD_COMPLETE_NO_POI
+            } else {
+                quest_giver_status::LEGENDARY_REWARD_COMPLETE_POI
+            }
+        } else if (quest.flags & wow_data::quest::QUEST_FLAGS_HIDE_REWARD_POI_LIKE_CPP) != 0 {
+            quest_giver_status::REWARD_COMPLETE_NO_POI
         } else {
-            quest_giver_status::NONE
+            quest_giver_status::REWARD_COMPLETE_POI
         }
     }
 
-    fn completed_quest_can_reward_status_like_cpp(&self, quest_id: u32) -> bool {
-        !self.is_quest_disabled_like_cpp(quest_id)
-            && self
+    fn represented_quest_reward_status_like_cpp(quest: &wow_data::quest::QuestTemplate) -> u64 {
+        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+            quest_giver_status::LEGENDARY_REWARD
+        } else {
+            quest_giver_status::REWARD
+        }
+    }
+
+    fn represented_quest_available_status_like_cpp(
+        quest: &wow_data::quest::QuestTemplate,
+        trivial: bool,
+    ) -> u64 {
+        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+            if trivial {
+                quest_giver_status::TRIVIAL_LEGENDARY_QUEST
+            } else {
+                quest_giver_status::LEGENDARY_QUEST
+            }
+        } else if quest.is_daily_like_cpp() {
+            if trivial {
+                quest_giver_status::TRIVIAL_DAILY_QUEST
+            } else {
+                quest_giver_status::DAILY_QUEST
+            }
+        } else if trivial {
+            quest_giver_status::TRIVIAL
+        } else {
+            quest_giver_status::QUEST
+        }
+    }
+
+    fn represented_quest_future_status_like_cpp(quest: &wow_data::quest::QuestTemplate) -> u64 {
+        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+            quest_giver_status::FUTURE_LEGENDARY_QUEST
+        } else {
+            quest_giver_status::FUTURE
+        }
+    }
+
+    fn represented_quest_is_trivial_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> bool {
+        const QUEST_LOW_LEVEL_HIDE_DIFF_LIKE_CPP: i32 = 4;
+        self.player_level_like_cpp() as i32
+            > quest
+                .quest_level
+                .saturating_add(QUEST_LOW_LEVEL_HIDE_DIFF_LIKE_CPP)
+    }
+
+    fn satisfy_quest_level_represented_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> bool {
+        let level = self.player_level_like_cpp();
+        if quest.min_level > 0 && i32::from(level) < quest.min_level {
+            return false;
+        }
+
+        if quest.max_level > 0 && level > quest.max_level {
+            return false;
+        }
+
+        true
+    }
+
+    fn satisfy_quest_race_class_represented_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> bool {
+        quest.is_available_for(
+            self.player_race_like_cpp(),
+            self.player_class_like_cpp(),
+            self.player_level_like_cpp()
+                .max(quest.min_level.max(1).min(i32::from(u8::MAX)) as u8),
+        )
+    }
+
+    fn can_see_start_quest_represented_bounded_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> bool {
+        const QUEST_HIGH_LEVEL_HIDE_DIFF_LIKE_CPP: i32 = 7;
+
+        if self.is_quest_disabled_like_cpp(quest.id) {
+            return false;
+        }
+
+        if self.quest_status_like_cpp(quest.id) != QUEST_STATUS_NONE_LIKE_CPP {
+            return false;
+        }
+
+        if quest.is_seasonal_like_cpp() && !self.seasonal_quests_like_cpp.is_empty() {
+            if let Some(bucket) = self
+                .seasonal_quests_like_cpp
+                .get(&quest.event_id_for_quest_like_cpp())
+            {
+                if !bucket.is_empty() && bucket.contains_key(&quest.id) {
+                    return false;
+                }
+            }
+        }
+
+        if quest.prev_quest_id != 0 {
+            let prev_id = quest.prev_quest_id.unsigned_abs();
+            if quest.prev_quest_id > 0 {
+                if !self.rewarded_quests.contains(&prev_id) {
+                    return false;
+                }
+            } else if !self
                 .player_quests
-                .get(&quest_id)
-                .is_some_and(|qs| qs.status == QUEST_STATUS_COMPLETE_LIKE_CPP)
+                .get(&prev_id)
+                .is_some_and(|qs| qs.status == QUEST_STATUS_INCOMPLETE_LIKE_CPP)
+            {
+                return false;
+            }
+        }
+
+        self.satisfy_quest_race_class_represented_like_cpp(quest)
+            && i32::from(self.player_level_like_cpp())
+                .saturating_add(QUEST_HIGH_LEVEL_HIDE_DIFF_LIKE_CPP)
+                >= quest.min_level
     }
 
     /// Check if the player currently has an active quest with the given ID.
@@ -13949,7 +14125,46 @@ mod tests {
 
         run_status_query(&mut session, guid).await;
 
-        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::AVAILABLE));
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::TRIVIAL));
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_canonical_creature_starter_sends_quest_when_not_trivial_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let mut quest = quest_template(1006);
+        quest.quest_level = 80;
+        let mut store = QuestStore::from_quests_like_cpp([quest]);
+        store.starter_quests.entry(9006).or_default().push(1006);
+        session.set_quest_store(Arc::new(store));
+        let guid = creature_guid(9006, 6);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9006);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::QUEST));
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_canonical_creature_starter_sends_future_when_visible_but_low_level_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let mut quest = quest_template(1007);
+        quest.quest_level = 85;
+        quest.min_level = 85;
+        let mut store = QuestStore::from_quests_like_cpp([quest]);
+        store.starter_quests.entry(9007).or_default().push(1007);
+        session.set_quest_store(Arc::new(store));
+        let guid = creature_guid(9007, 7);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9007);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::FUTURE));
     }
 
     #[tokio::test]
@@ -13997,7 +14212,7 @@ mod tests {
 
         run_status_query(&mut session, guid).await;
 
-        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::AVAILABLE));
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::TRIVIAL));
     }
 
     #[tokio::test]
@@ -14090,7 +14305,7 @@ mod tests {
 
         assert_eq!(
             recv_status_multiple(&send_rx),
-            vec![(guid, quest_giver_status::AVAILABLE)]
+            vec![(guid, quest_giver_status::TRIVIAL)]
         );
     }
 
@@ -14111,7 +14326,7 @@ mod tests {
 
         assert_eq!(
             recv_status_multiple(&send_rx),
-            vec![(guid, quest_giver_status::AVAILABLE)]
+            vec![(guid, quest_giver_status::TRIVIAL)]
         );
     }
 
@@ -14151,7 +14366,7 @@ mod tests {
 
         assert_eq!(
             recv_status_multiple(&send_rx),
-            vec![(accepted_guid, quest_giver_status::AVAILABLE)]
+            vec![(accepted_guid, quest_giver_status::TRIVIAL)]
         );
     }
 

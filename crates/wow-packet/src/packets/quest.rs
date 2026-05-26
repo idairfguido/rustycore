@@ -125,11 +125,7 @@ impl ClientPacket for PushQuestToParty {
 /// C# ref: QuestGiverStatusPkt
 pub struct QuestGiverStatus {
     pub guid: ObjectGuid,
-    /// Status flags: 0=None, 2=Future(grey ?), 4=Trivial(grey ?),
-    /// 5=TrivialRepeatableTurnIn, 6=TrivialDaily, 8=FailedTimer,
-    /// 9=FailedFail, 16=CanReward, 17=CanRewardDailyMixed,
-    /// 18=CanRewardRep, 32=Available(yellow !), 64=AvailableRep,
-    /// 4096=AvailableDaily(blue !)
+    /// C++ `QuestGiverStatus` bitmask from `QuestDef.h`.
     pub status: u64,
 }
 
@@ -203,12 +199,26 @@ impl ServerPacket for WorldQuestUpdateResponse {
 // ── Quest giver status constants ──────────────────────────────────────────────
 pub mod quest_giver_status {
     pub const NONE: u64 = 0;
-    pub const FUTURE: u64 = 2;
-    pub const TRIVIAL: u64 = 4;
-    pub const FAILED_TIMER: u64 = 8;
-    pub const CAN_REWARD: u64 = 16;
-    pub const AVAILABLE: u64 = 32;
-    pub const AVAILABLE_DAILY: u64 = 4096;
+    pub const FUTURE: u64 = 0x0000_0002;
+    pub const TRIVIAL: u64 = 0x0000_0004;
+    pub const TRIVIAL_REPEATABLE_TURNIN: u64 = 0x0000_0008;
+    pub const TRIVIAL_DAILY_QUEST: u64 = 0x0000_0010;
+    pub const REWARD: u64 = 0x0000_0020;
+    pub const REPEATABLE_TURNIN: u64 = 0x0000_0100;
+    pub const DAILY_QUEST: u64 = 0x0000_0200;
+    pub const QUEST: u64 = 0x0000_0400;
+    pub const REWARD_COMPLETE_NO_POI: u64 = 0x0000_0800;
+    pub const REWARD_COMPLETE_POI: u64 = 0x0000_1000;
+    pub const LEGENDARY_QUEST: u64 = 0x0000_2000;
+    pub const LEGENDARY_REWARD_COMPLETE_NO_POI: u64 = 0x0000_4000;
+    pub const LEGENDARY_REWARD_COMPLETE_POI: u64 = 0x0000_8000;
+    pub const TRIVIAL_LEGENDARY_QUEST: u64 = 0x0004_0000;
+    pub const FUTURE_LEGENDARY_QUEST: u64 = 0x0008_0000;
+    pub const LEGENDARY_REWARD: u64 = 0x0010_0000;
+
+    pub const AVAILABLE: u64 = QUEST;
+    pub const AVAILABLE_DAILY: u64 = DAILY_QUEST;
+    pub const CAN_REWARD: u64 = REWARD_COMPLETE_POI;
 }
 
 // ── SMSG_QUEST_GIVER_QUEST_LIST_MESSAGE ──────────────────────────────────────
@@ -894,6 +904,18 @@ mod tests {
         assert_eq!(pkt.read_int32().unwrap(), 1);
         assert_eq!(pkt.read_packed_guid().unwrap(), guid);
         assert_eq!(pkt.read_uint64().unwrap(), status);
+    }
+
+    #[test]
+    fn quest_giver_status_constants_match_cpp_quest_def_like_cpp() {
+        assert_eq!(quest_giver_status::NONE, 0x0000_0000);
+        assert_eq!(quest_giver_status::FUTURE, 0x0000_0002);
+        assert_eq!(quest_giver_status::TRIVIAL, 0x0000_0004);
+        assert_eq!(quest_giver_status::REWARD, 0x0000_0020);
+        assert_eq!(quest_giver_status::DAILY_QUEST, 0x0000_0200);
+        assert_eq!(quest_giver_status::QUEST, 0x0000_0400);
+        assert_eq!(quest_giver_status::REWARD_COMPLETE_POI, 0x0000_1000);
+        assert_eq!(quest_giver_status::LEGENDARY_REWARD, 0x0010_0000);
     }
 
     #[test]

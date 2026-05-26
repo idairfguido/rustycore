@@ -5346,11 +5346,13 @@ impl WorldSession {
 
         match state.go_type.map(u32::from) {
             Some(wow_entities::GAMEOBJECT_TYPE_QUESTGIVER) => {
-                self.get_represented_quest_giver_status_like_cpp(
+                let status = self.get_represented_quest_giver_status_like_cpp(
                     crate::handlers::quest::RepresentedQuestGiverStatusSourceLikeCpp::GameObject {
                         entry: gameobject_entry,
                     },
-                ) != 0
+                );
+                status != wow_packet::packets::quest::quest_giver_status::NONE
+                    && status != wow_packet::packets::quest::quest_giver_status::FUTURE
             }
             Some(wow_entities::GAMEOBJECT_TYPE_CHEST) => state.loot_state
                 != Some(wow_entities::LootState::NotReady)
@@ -22493,7 +22495,8 @@ mod tests {
         let gameobject_guid = test_gameobject_guid(go_entry, 139);
         let quest_id = 12_546;
         let mut quest = test_quest_template(quest_id);
-        quest.min_level = 90;
+        quest.quest_level = 85;
+        quest.min_level = 85;
         let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([quest]);
         quest_store
             .gameobject_starter_quests
