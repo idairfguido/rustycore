@@ -155,6 +155,7 @@ pub struct SessionResources {
     pub quest_store: Option<Arc<wow_data::quest::QuestStore>>,
     pub quest_xp_store: Option<Arc<wow_data::quest_xp::QuestXpStore>>,
     pub quest_v2_store: Option<Arc<wow_data::progression_rewards::QuestV2Store>>,
+    pub quest_info_store: Option<Arc<wow_data::progression_rewards::QuestInfoStore>>,
     pub quest_package_item_store: Option<Arc<wow_data::progression_rewards::QuestPackageItemStore>>,
     pub quest_faction_reward_store:
         Option<Arc<wow_data::progression_rewards::QuestFactionRewardStore>>,

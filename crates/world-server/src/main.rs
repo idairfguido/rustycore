@@ -1359,6 +1359,10 @@ async fn main() -> Result<()> {
         wow_data::progression_rewards::QuestV2Store::load(&data_dir, &locale)
             .context("Failed to load QuestV2.db2 — check DataDir and DBC.Locale config")?,
     );
+    let quest_info_store = Arc::new(
+        wow_data::progression_rewards::QuestInfoStore::load(&data_dir, &locale)
+            .context("Failed to load QuestInfo.db2 — check DataDir and DBC.Locale config")?,
+    );
     let quest_package_item_store = Arc::new(
         wow_data::progression_rewards::QuestPackageItemStore::load(&data_dir, &locale)
             .context("Failed to load QuestPackageItem.db2 — check DataDir and DBC.Locale config")?,
@@ -1949,6 +1953,7 @@ async fn main() -> Result<()> {
         quest_store: Some(Arc::clone(&quest_store)),
         quest_xp_store: Some(Arc::clone(&quest_xp_store)),
         quest_v2_store: Some(Arc::clone(&quest_v2_store)),
+        quest_info_store: Some(Arc::clone(&quest_info_store)),
         quest_package_item_store: Some(Arc::clone(&quest_package_item_store)),
         quest_faction_reward_store: Some(Arc::clone(&quest_faction_reward_store)),
         progression_faction_store: Some(Arc::clone(&progression_faction_store)),
@@ -6854,6 +6859,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.quest_v2_store {
         session.set_quest_v2_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.quest_info_store {
+        session.set_quest_info_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.quest_package_item_store {
         session.set_quest_package_item_store(Arc::clone(store));

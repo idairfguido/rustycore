@@ -27,7 +27,7 @@ use wow_data::{
     DISABLE_TYPE_QUEST,
     progression_rewards::{
         QUEST_PACKAGE_FILTER_CLASS_LIKE_CPP, QUEST_PACKAGE_FILTER_EVERYONE_LIKE_CPP,
-        QUEST_PACKAGE_FILTER_LOOT_SPECIALIZATION_LIKE_CPP, QuestPackageItemEntry,
+        QUEST_PACKAGE_FILTER_LOOT_SPECIALIZATION_LIKE_CPP, QuestInfoEntry, QuestPackageItemEntry,
     },
     quest::QuestStore,
     reputation::reputation_rank_from_standing_like_cpp as reputation_rank_from_standing_data_like_cpp,
@@ -5536,10 +5536,10 @@ impl WorldSession {
         for quest in turn_in_quests {
             match self.quest_status_like_cpp(quest.id) {
                 QUEST_STATUS_COMPLETE_LIKE_CPP => {
-                    result |= Self::represented_quest_reward_complete_status_like_cpp(quest);
+                    result |= self.represented_quest_reward_complete_status_like_cpp(quest);
                 }
                 QUEST_STATUS_INCOMPLETE_LIKE_CPP => {
-                    result |= Self::represented_quest_reward_status_like_cpp(quest);
+                    result |= self.represented_quest_reward_status_like_cpp(quest);
                 }
                 _ => {}
             }
@@ -5581,12 +5581,12 @@ impl WorldSession {
             }
 
             if self.satisfy_quest_level_represented_like_cpp(quest) {
-                result |= Self::represented_quest_available_status_like_cpp(
+                result |= self.represented_quest_available_status_like_cpp(
                     quest,
                     self.represented_quest_is_trivial_like_cpp(quest),
                 );
             } else {
-                result |= Self::represented_quest_future_status_like_cpp(quest);
+                result |= self.represented_quest_future_status_like_cpp(quest);
             }
         }
 
@@ -5681,10 +5681,50 @@ impl WorldSession {
             .unwrap_or(QUEST_STATUS_NONE_LIKE_CPP)
     }
 
+    fn represented_quest_info_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> Option<&QuestInfoEntry> {
+        self.quest_info_store
+            .as_ref()
+            .and_then(|store| store.get(quest.quest_info_id as u32))
+    }
+
+    fn represented_quest_is_important_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> bool {
+        const QUEST_INFO_MODIFIER_IMPORTANT_LIKE_CPP: i32 = 0x400;
+        self.represented_quest_info_like_cpp(quest)
+            .is_some_and(|info| (info.modifiers & QUEST_INFO_MODIFIER_IMPORTANT_LIKE_CPP) != 0)
+    }
+
+    fn represented_quest_is_covenant_calling_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> bool {
+        const QUEST_TAG_TYPE_COVENANT_CALLING_LIKE_CPP: i8 = 15;
+        self.represented_quest_info_like_cpp(quest)
+            .is_some_and(|info| info.quest_type == QUEST_TAG_TYPE_COVENANT_CALLING_LIKE_CPP)
+    }
+
     fn represented_quest_reward_complete_status_like_cpp(
+        &self,
         quest: &wow_data::quest::QuestTemplate,
     ) -> u64 {
-        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+        if self.represented_quest_is_important_like_cpp(quest) {
+            if (quest.flags & wow_data::quest::QUEST_FLAGS_HIDE_REWARD_POI_LIKE_CPP) != 0 {
+                quest_giver_status::IMPORTANT_QUEST_REWARD_COMPLETE_NO_POI
+            } else {
+                quest_giver_status::IMPORTANT_QUEST_REWARD_COMPLETE_POI
+            }
+        } else if self.represented_quest_is_covenant_calling_like_cpp(quest) {
+            if (quest.flags & wow_data::quest::QUEST_FLAGS_HIDE_REWARD_POI_LIKE_CPP) != 0 {
+                quest_giver_status::COVENANT_CALLING_REWARD_COMPLETE_NO_POI
+            } else {
+                quest_giver_status::COVENANT_CALLING_REWARD_COMPLETE_POI
+            }
+        } else if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
             if (quest.flags & wow_data::quest::QUEST_FLAGS_HIDE_REWARD_POI_LIKE_CPP) != 0 {
                 quest_giver_status::LEGENDARY_REWARD_COMPLETE_NO_POI
             } else {
@@ -5697,8 +5737,15 @@ impl WorldSession {
         }
     }
 
-    fn represented_quest_reward_status_like_cpp(quest: &wow_data::quest::QuestTemplate) -> u64 {
-        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+    fn represented_quest_reward_status_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> u64 {
+        if self.represented_quest_is_important_like_cpp(quest) {
+            quest_giver_status::IMPORTANT_REWARD
+        } else if self.represented_quest_is_covenant_calling_like_cpp(quest) {
+            quest_giver_status::COVENANT_CALLING_REWARD
+        } else if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
             quest_giver_status::LEGENDARY_REWARD
         } else {
             quest_giver_status::REWARD
@@ -5706,10 +5753,19 @@ impl WorldSession {
     }
 
     fn represented_quest_available_status_like_cpp(
+        &self,
         quest: &wow_data::quest::QuestTemplate,
         trivial: bool,
     ) -> u64 {
-        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+        if self.represented_quest_is_important_like_cpp(quest) {
+            if trivial {
+                quest_giver_status::TRIVIAL_IMPORTANT_QUEST
+            } else {
+                quest_giver_status::IMPORTANT_QUEST
+            }
+        } else if self.represented_quest_is_covenant_calling_like_cpp(quest) {
+            quest_giver_status::COVENANT_CALLING_QUEST
+        } else if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
             if trivial {
                 quest_giver_status::TRIVIAL_LEGENDARY_QUEST
             } else {
@@ -5728,8 +5784,13 @@ impl WorldSession {
         }
     }
 
-    fn represented_quest_future_status_like_cpp(quest: &wow_data::quest::QuestTemplate) -> u64 {
-        if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
+    fn represented_quest_future_status_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> u64 {
+        if self.represented_quest_is_important_like_cpp(quest) {
+            quest_giver_status::FUTURE_IMPORTANT_QUEST
+        } else if (quest.flags_ex & wow_data::quest::QUEST_FLAGS_EX_LEGENDARY_LIKE_CPP) != 0 {
             quest_giver_status::FUTURE_LEGENDARY_QUEST
         } else {
             quest_giver_status::FUTURE
@@ -6313,8 +6374,8 @@ mod tests {
         ItemStatsStore, ItemStore,
         progression_rewards::{
             FactionEntry, FactionStore, QUEST_PACKAGE_FILTER_UNMATCHED_LIKE_CPP,
-            QuestFactionRewardEntry, QuestFactionRewardStore, QuestPackageItemEntry,
-            QuestPackageItemStore,
+            QuestFactionRewardEntry, QuestFactionRewardStore, QuestInfoEntry, QuestInfoStore,
+            QuestPackageItemEntry, QuestPackageItemStore,
         },
         reputation::{ReputationRewardRateEntryLikeCpp, ReputationRewardRateStoreLikeCpp},
     };
@@ -6433,6 +6494,16 @@ mod tests {
             required_max_rep_value: 0,
             reward_choice_items: [(0, 0); QUEST_REWARD_CHOICES_COUNT],
             reward_choice_item_types: [0; QUEST_REWARD_CHOICES_COUNT],
+        }
+    }
+
+    fn quest_info_entry_like_cpp(id: u32, quest_type: i8, modifiers: i32) -> QuestInfoEntry {
+        QuestInfoEntry {
+            id,
+            info_name: String::new(),
+            quest_type,
+            modifiers,
+            profession: 0,
         }
     }
 
@@ -14339,6 +14410,99 @@ mod tests {
         assert_eq!(
             recv_status(&send_rx),
             (guid, quest_giver_status::CAN_REWARD)
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_important_starter_uses_quest_info_modifiers_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let quest_id = 1010;
+        let mut quest = quest_template(quest_id);
+        quest.quest_level = 80;
+        quest.quest_info_id = 710;
+        let mut store = QuestStore::from_quests_like_cpp([quest]);
+        store.starter_quests.entry(9010).or_default().push(quest_id);
+        session.set_quest_store(Arc::new(store));
+        session.set_quest_info_store(Arc::new(QuestInfoStore::from_entries([
+            quest_info_entry_like_cpp(710, 2, 0x400),
+        ])));
+        let guid = creature_guid(9010, 10);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9010);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(
+            recv_status(&send_rx),
+            (guid, quest_giver_status::IMPORTANT_QUEST)
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_important_low_level_uses_future_important_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let quest_id = 1011;
+        let mut quest = quest_template(quest_id);
+        quest.quest_level = 85;
+        quest.min_level = 85;
+        quest.quest_info_id = 711;
+        let mut store = QuestStore::from_quests_like_cpp([quest]);
+        store.starter_quests.entry(9011).or_default().push(quest_id);
+        session.set_quest_store(Arc::new(store));
+        session.set_quest_info_store(Arc::new(QuestInfoStore::from_entries([
+            quest_info_entry_like_cpp(711, 2, 0x400),
+        ])));
+        let guid = creature_guid(9011, 11);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9011);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(
+            recv_status(&send_rx),
+            (guid, quest_giver_status::FUTURE_IMPORTANT_QUEST)
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_covenant_completed_ender_uses_quest_info_tag_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let quest_id = 1012;
+        let mut quest = quest_template(quest_id);
+        quest.quest_info_id = 712;
+        let mut store = QuestStore::from_quests_like_cpp([quest]);
+        store.ender_quests.entry(9012).or_default().push(quest_id);
+        session.set_quest_store(Arc::new(store));
+        session.set_quest_info_store(Arc::new(QuestInfoStore::from_entries([
+            quest_info_entry_like_cpp(712, 15, 0),
+        ])));
+        session.player_quests.insert(
+            quest_id,
+            PlayerQuestStatus {
+                quest_id,
+                status: QUEST_STATUS_COMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: Vec::new(),
+                slot: 0,
+            },
+        );
+        let guid = creature_guid(9012, 12);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9012);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(
+            recv_status(&send_rx),
+            (
+                guid,
+                quest_giver_status::COVENANT_CALLING_REWARD_COMPLETE_POI
+            )
         );
     }
 

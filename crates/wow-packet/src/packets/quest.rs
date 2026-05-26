@@ -204,6 +204,8 @@ pub mod quest_giver_status {
     pub const TRIVIAL_REPEATABLE_TURNIN: u64 = 0x0000_0008;
     pub const TRIVIAL_DAILY_QUEST: u64 = 0x0000_0010;
     pub const REWARD: u64 = 0x0000_0020;
+    pub const JOURNEY_REWARD: u64 = 0x0000_0040;
+    pub const COVENANT_CALLING_REWARD: u64 = 0x0000_0080;
     pub const REPEATABLE_TURNIN: u64 = 0x0000_0100;
     pub const DAILY_QUEST: u64 = 0x0000_0200;
     pub const QUEST: u64 = 0x0000_0400;
@@ -212,9 +214,23 @@ pub mod quest_giver_status {
     pub const LEGENDARY_QUEST: u64 = 0x0000_2000;
     pub const LEGENDARY_REWARD_COMPLETE_NO_POI: u64 = 0x0000_4000;
     pub const LEGENDARY_REWARD_COMPLETE_POI: u64 = 0x0000_8000;
-    pub const TRIVIAL_LEGENDARY_QUEST: u64 = 0x0004_0000;
-    pub const FUTURE_LEGENDARY_QUEST: u64 = 0x0008_0000;
-    pub const LEGENDARY_REWARD: u64 = 0x0010_0000;
+    pub const JOURNEY_QUEST: u64 = 0x0001_0000;
+    pub const JOURNEY_REWARD_COMPLETE_NO_POI: u64 = 0x0002_0000;
+    pub const JOURNEY_REWARD_COMPLETE_POI: u64 = 0x0004_0000;
+    pub const COVENANT_CALLING_QUEST: u64 = 0x0008_0000;
+    pub const COVENANT_CALLING_REWARD_COMPLETE_NO_POI: u64 = 0x0010_0000;
+    pub const COVENANT_CALLING_REWARD_COMPLETE_POI: u64 = 0x0020_0000;
+    pub const TRIVIAL_LEGENDARY_QUEST: u64 = 0x0040_0000;
+    pub const FUTURE_LEGENDARY_QUEST: u64 = 0x0080_0000;
+    pub const LEGENDARY_REWARD: u64 = 0x0100_0000;
+    pub const IMPORTANT_QUEST: u64 = 0x0200_0000;
+    pub const IMPORTANT_REWARD: u64 = 0x0400_0000;
+    pub const TRIVIAL_IMPORTANT_QUEST: u64 = 0x0800_0000;
+    pub const FUTURE_IMPORTANT_QUEST: u64 = 0x1000_0000;
+    pub const IMPORTANT_QUEST_REWARD_COMPLETE_NO_POI: u64 = 0x2000_0000;
+    pub const IMPORTANT_QUEST_REWARD_COMPLETE_POI: u64 = 0x4000_0000;
+    pub const TRIVIAL_JOURNEY_QUEST: u64 = 0x8000_0000;
+    pub const FUTURE_JOURNEY_QUEST: u64 = 0x1_0000_0000;
 
     pub const AVAILABLE: u64 = QUEST;
     pub const AVAILABLE_DAILY: u64 = DAILY_QUEST;
@@ -911,11 +927,57 @@ mod tests {
         assert_eq!(quest_giver_status::NONE, 0x0000_0000);
         assert_eq!(quest_giver_status::FUTURE, 0x0000_0002);
         assert_eq!(quest_giver_status::TRIVIAL, 0x0000_0004);
+        assert_eq!(quest_giver_status::TRIVIAL_REPEATABLE_TURNIN, 0x0000_0008);
+        assert_eq!(quest_giver_status::TRIVIAL_DAILY_QUEST, 0x0000_0010);
         assert_eq!(quest_giver_status::REWARD, 0x0000_0020);
+        assert_eq!(quest_giver_status::JOURNEY_REWARD, 0x0000_0040);
+        assert_eq!(quest_giver_status::COVENANT_CALLING_REWARD, 0x0000_0080);
+        assert_eq!(quest_giver_status::REPEATABLE_TURNIN, 0x0000_0100);
         assert_eq!(quest_giver_status::DAILY_QUEST, 0x0000_0200);
         assert_eq!(quest_giver_status::QUEST, 0x0000_0400);
+        assert_eq!(quest_giver_status::REWARD_COMPLETE_NO_POI, 0x0000_0800);
         assert_eq!(quest_giver_status::REWARD_COMPLETE_POI, 0x0000_1000);
-        assert_eq!(quest_giver_status::LEGENDARY_REWARD, 0x0010_0000);
+        assert_eq!(quest_giver_status::LEGENDARY_QUEST, 0x0000_2000);
+        assert_eq!(
+            quest_giver_status::LEGENDARY_REWARD_COMPLETE_NO_POI,
+            0x0000_4000
+        );
+        assert_eq!(
+            quest_giver_status::LEGENDARY_REWARD_COMPLETE_POI,
+            0x0000_8000
+        );
+        assert_eq!(quest_giver_status::JOURNEY_QUEST, 0x0001_0000);
+        assert_eq!(
+            quest_giver_status::JOURNEY_REWARD_COMPLETE_NO_POI,
+            0x0002_0000
+        );
+        assert_eq!(quest_giver_status::JOURNEY_REWARD_COMPLETE_POI, 0x0004_0000);
+        assert_eq!(quest_giver_status::COVENANT_CALLING_QUEST, 0x0008_0000);
+        assert_eq!(
+            quest_giver_status::COVENANT_CALLING_REWARD_COMPLETE_NO_POI,
+            0x0010_0000
+        );
+        assert_eq!(
+            quest_giver_status::COVENANT_CALLING_REWARD_COMPLETE_POI,
+            0x0020_0000
+        );
+        assert_eq!(quest_giver_status::TRIVIAL_LEGENDARY_QUEST, 0x0040_0000);
+        assert_eq!(quest_giver_status::FUTURE_LEGENDARY_QUEST, 0x0080_0000);
+        assert_eq!(quest_giver_status::LEGENDARY_REWARD, 0x0100_0000);
+        assert_eq!(quest_giver_status::IMPORTANT_QUEST, 0x0200_0000);
+        assert_eq!(quest_giver_status::IMPORTANT_REWARD, 0x0400_0000);
+        assert_eq!(quest_giver_status::TRIVIAL_IMPORTANT_QUEST, 0x0800_0000);
+        assert_eq!(quest_giver_status::FUTURE_IMPORTANT_QUEST, 0x1000_0000);
+        assert_eq!(
+            quest_giver_status::IMPORTANT_QUEST_REWARD_COMPLETE_NO_POI,
+            0x2000_0000
+        );
+        assert_eq!(
+            quest_giver_status::IMPORTANT_QUEST_REWARD_COMPLETE_POI,
+            0x4000_0000
+        );
+        assert_eq!(quest_giver_status::TRIVIAL_JOURNEY_QUEST, 0x8000_0000);
+        assert_eq!(quest_giver_status::FUTURE_JOURNEY_QUEST, 0x1_0000_0000);
     }
 
     #[test]

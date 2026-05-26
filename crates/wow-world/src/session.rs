@@ -61,7 +61,7 @@ use wow_data::{
     progression_rewards::{
         ContentTuningStore, FactionEntry, FactionStore, FactionTemplateStore,
         FriendshipRepReactionStore, ParagonReputationStore, QuestFactionRewardStore,
-        QuestPackageItemStore, QuestV2Store,
+        QuestInfoStore, QuestPackageItemStore, QuestV2Store,
     },
     reputation::{
         CreatureOnKillReputationStoreLikeCpp, RepSpilloverTemplateStoreLikeCpp,
@@ -2185,6 +2185,7 @@ pub struct WorldSession {
     pub(crate) quest_pool_store: Option<Arc<wow_data::quest::QuestPoolStoreLikeCpp>>,
     pub(crate) quest_xp_store: Option<Arc<wow_data::quest_xp::QuestXpStore>>,
     pub(crate) quest_v2_store: Option<Arc<QuestV2Store>>,
+    pub(crate) quest_info_store: Option<Arc<QuestInfoStore>>,
     pub(crate) quest_package_item_store: Option<Arc<QuestPackageItemStore>>,
     pub(crate) quest_faction_reward_store: Option<Arc<QuestFactionRewardStore>>,
     pub(crate) player_xp_table: Option<Arc<Vec<u32>>>,
@@ -2989,6 +2990,7 @@ impl WorldSession {
             quest_pool_store: None,
             quest_xp_store: None,
             quest_v2_store: None,
+            quest_info_store: None,
             quest_package_item_store: None,
             quest_faction_reward_store: None,
             player_quests: HashMap::new(),
@@ -8999,6 +9001,11 @@ impl WorldSession {
     /// Set the QuestV2 store shared reference used for C++ quest unique-bit lookups.
     pub fn set_quest_v2_store(&mut self, store: Arc<QuestV2Store>) {
         self.quest_v2_store = Some(store);
+    }
+
+    /// Set the QuestInfo store used by C++ Quest::GetQuestTag/IsImportant.
+    pub fn set_quest_info_store(&mut self, store: Arc<QuestInfoStore>) {
+        self.quest_info_store = Some(store);
     }
 
     /// Set the QuestPackageItem store used by C++ quest package reward selection.
