@@ -5624,6 +5624,34 @@ impl WorldSession {
                 },
             )
             .collect();
+        let quest_objective_progress: Vec<_> = self
+            .quest_store
+            .as_ref()
+            .map(|store| {
+                self.player_quests
+                    .iter()
+                    .filter_map(|(&quest_id, status)| {
+                        store.get(quest_id).map(|quest| {
+                            quest.objectives.iter().filter_map(move |objective| {
+                                let storage_index =
+                                    usize::try_from(objective.storage_index).ok()?;
+                                let counter = status
+                                    .objective_counts
+                                    .get(storage_index)
+                                    .copied()
+                                    .unwrap_or(0);
+                                Some(crate::conditions::ConditionQuestObjectiveProgressSnapshot {
+                                    quest_id,
+                                    objective_id: objective.id,
+                                    counter,
+                                })
+                            })
+                        })
+                    })
+                    .flatten()
+                    .collect()
+            })
+            .unwrap_or_default();
         let rewarded_quest_ids: Vec<_> = self.rewarded_quests.iter().copied().collect();
         let daily_quest_ids: Vec<_> = self
             .daily_quests_completed_like_cpp
@@ -5632,7 +5660,7 @@ impl WorldSession {
             .collect();
         let quest_snapshot = crate::conditions::ConditionPlayerQuestSnapshot {
             statuses: &quest_statuses,
-            objective_progress: &[],
+            objective_progress: &quest_objective_progress,
             rewarded_quest_ids: &rewarded_quest_ids,
             daily_quest_ids: &daily_quest_ids,
         };
@@ -14415,6 +14443,102 @@ mod tests {
         run_status_query(&mut session, guid).await;
 
         assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::QUEST));
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_starter_allows_objective_progress_condition_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let active_quest_id = 1015;
+        let starter_quest_id = 1016;
+        let active_quest = quest_template_with_objective_count(active_quest_id, 1);
+        let objective_id = active_quest.objectives[0].id;
+        let mut starter_quest = quest_template(starter_quest_id);
+        starter_quest.quest_level = 80;
+        let mut store = QuestStore::from_quests_like_cpp([active_quest, starter_quest]);
+        store
+            .starter_quests
+            .entry(9016)
+            .or_default()
+            .push(starter_quest_id);
+        session.set_quest_store(Arc::new(store));
+        session.player_quests.insert(
+            active_quest_id,
+            PlayerQuestStatus {
+                quest_id: active_quest_id,
+                status: QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![2],
+                slot: 0,
+            },
+        );
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::QuestAvailable,
+                source_entry: starter_quest_id as i32,
+                condition_type: ConditionType::QuestObjectiveProgress,
+                condition_value1: objective_id,
+                condition_value3: 2,
+                ..Condition::default()
+            }]),
+        ));
+        let guid = creature_guid(9016, 16);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9016);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::QUEST));
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_query_starter_rejects_objective_progress_mismatch_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let active_quest_id = 1017;
+        let starter_quest_id = 1018;
+        let active_quest = quest_template_with_objective_count(active_quest_id, 1);
+        let objective_id = active_quest.objectives[0].id;
+        let mut starter_quest = quest_template(starter_quest_id);
+        starter_quest.quest_level = 80;
+        let mut store = QuestStore::from_quests_like_cpp([active_quest, starter_quest]);
+        store
+            .starter_quests
+            .entry(9018)
+            .or_default()
+            .push(starter_quest_id);
+        session.set_quest_store(Arc::new(store));
+        session.player_quests.insert(
+            active_quest_id,
+            PlayerQuestStatus {
+                quest_id: active_quest_id,
+                status: QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![2],
+                slot: 0,
+            },
+        );
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::QuestAvailable,
+                source_entry: starter_quest_id as i32,
+                condition_type: ConditionType::QuestObjectiveProgress,
+                condition_value1: objective_id,
+                condition_value3: 3,
+                ..Condition::default()
+            }]),
+        ));
+        let guid = creature_guid(9018, 18);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9018);
+        attach_map_manager(&mut session, manager);
+
+        run_status_query(&mut session, guid).await;
+
+        assert_eq!(recv_status(&send_rx), (guid, quest_giver_status::NONE));
     }
 
     #[tokio::test]
